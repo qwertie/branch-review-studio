@@ -23,6 +23,7 @@ export const headerCommands = [
   { id: "changeBaseBranch", title: "Change Base Branch…", icon: "arrow-swap" },
   { id: "switchBranch", title: "Switch Branch…", icon: "git-branch" },
   { id: "openAllChanges", title: "Open All Changes", icon: "diff-multiple" },
+  { id: "deleteResolvedThreads", title: "Delete Resolved Threads", icon: "clear-all" },
   { id: "refresh", title: "Refresh", icon: "refresh" },
   { id: "openSettings", title: "Settings and Integrations", icon: "gear" },
 ] as const;
@@ -34,7 +35,8 @@ export type ViewRequest =
   | { action: "openGroup", section: OutlineSection }
   /** Open a file's diff in the section's view, the file itself, or its whole-file diff */
   | { action: "openFile" | "openEditor" | "openWholeDiff", section: OutlineSection, file: OutlineFile }
-  | { action: "revealThread", section: OutlineSection, file: OutlineFile, thread: OutlineThread };
+  /** Reveal a thread in its file's diff, or delete it (after asking) */
+  | { action: "revealThread" | "deleteThread", section: OutlineSection, file: OutlineFile, thread: OutlineThread };
 
 /** Maximum length of the text of a thread row; CSS shortens it further to fit the view's width */
 const maxThreadTextLength = 300;
@@ -86,7 +88,7 @@ export function parseViewMessage(message: unknown, outline: ReviewOutline): View
     return { action, section };
   if ((action === "openFile" || action === "openEditor" || action === "openWholeDiff") && section && file)
     return { action, section, file };
-  if (action === "revealThread" && section && file && thread)
+  if ((action === "revealThread" || action === "deleteThread") && section && file && thread)
     return { action, section, file, thread };
   return undefined;
 }
@@ -145,10 +147,8 @@ function renderFile(section: OutlineSection, file: OutlineFile, level: number): 
     + (folder === "." ? "" : `<span class="dim folder">${escapeHtml(folder)}</span>`)
     + (file.isPartial ? `<span class="tag">partial</span>` : "")
     + (openCount > 0 ? `<span class="count" title="${formatCount(openCount, "open thread")}">${openCount}</span>` : "")
-    + `<span class="actions"><button class="icon-button codicon codicon-go-to-file" tabindex="-1" `
-    + `data-action="openEditor" title="Open File" aria-label="Open File"></button>`
-    + `<button class="icon-button codicon codicon-diff" tabindex="-1" data-action="openWholeDiff" `
-    + `title="Open Changes (whole file)" aria-label="Open Changes (whole file)"></button></span>`;
+    + `<span class="actions">${renderRowButton("openEditor", "go-to-file", "Open File")}`
+    + `${renderRowButton("openWholeDiff", "diff", "Open Changes (whole file)")}</span>`;
   let threads = file.threads.map(t => renderThread(section, file, t, level + 1)).join("");
   let row = renderRow("file-row", level, file.threads.length > 0, attributes, content);
   return file.threads.length === 0 ? row : `<div class="node" data-key="${escapeHtml(`f:${section.group?.id ?? ""}:`
@@ -166,7 +166,8 @@ function renderThread(section: OutlineSection, file: OutlineFile, thread: Outlin
   let content = `<span class="codicon codicon-${status === "resolved" ? "pass" : "comment-discussion"} state" `
     + `title="${status === "resolved" ? "Resolved" : "Open"}"></span>`
     + (severity ? `<span class="severity severity-${severity}">${severity}</span>` : "")
-    + `<span class="text">${escapeHtml(text)}</span><span class="dim">${details}</span>`;
+    + `<span class="text">${escapeHtml(text)}</span><span class="dim">${details}</span>`
+    + `<span class="actions">${renderRowButton("deleteThread", "trash", "Delete Thread")}</span>`;
   return renderRow(`thread-row ${escapeHtml(status)}`, level, false, attributes, content);
 }
 
@@ -179,6 +180,12 @@ function renderRow(className: string, level: number, isExpandable: boolean, attr
   return `<div class="row ${className}" role="treeitem" aria-level="${level}" tabindex="-1" ${attributes}`
     + `${isExpandable ? ` aria-expanded="true"` : ""}>${isExpandable ? twistie : `<span class="twistie"></span>`}`
     + `${content}</div>`;
+}
+
+/** Renders a button that a row shows while the mouse is over it or it has the focus. */
+function renderRowButton(action: ViewRequest["action"], icon: string, title: string): string {
+  return `<button class="icon-button codicon codicon-${icon}" tabindex="-1" data-action="${action}" title="${title}" `
+    + `aria-label="${title}"></button>`;
 }
 
 /**

@@ -12,6 +12,7 @@ import {
 } from "./base-content";
 import { changeBaseBranch } from "./change-base-branch";
 import { ReviewCommentController } from "./comments";
+import { clearReview, deleteResolvedThreads } from "./delete-commands";
 import { fetchBase, openAllChanges, openFileDiff, openGroupChanges } from "./diff-commands";
 import { installMcpServer, installSkill, uninstall, updateInstalledServerIfOutdated } from "./install";
 import { BranchReviewModel } from "./model";
@@ -27,6 +28,8 @@ export interface BranchReviewStudioExports {
   getSettingsPanelHtml: () => string | undefined;
   /** Gets the body HTML of the Branch Review view */
   getReviewViewHtml: () => string;
+  /** Handles a message as if the Branch Review view's script had posted it */
+  handleReviewViewMessage: (message: unknown) => Promise<void>;
   vscodeChat: VscodeChatIntegration;
 }
 
@@ -61,7 +64,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Branch
     await model.refresh();
   }
   return { model, getSettingsPanelHtml: SettingsPanel.getHtmlIfOpen, getReviewViewHtml: () => view.getBody(),
-    vscodeChat };
+    handleReviewViewMessage: message => view.handleMessage(message), vscodeChat };
 }
 
 export function deactivate(): void {}
@@ -113,6 +116,8 @@ function registerCommands(context: vscode.ExtensionContext, model: BranchReviewM
     resolveThread: (_, thread: vscode.CommentThread) => comments?.setThreadStatus(thread, "resolved"),
     unresolveThread: (_, thread: vscode.CommentThread) => comments?.setThreadStatus(thread, "open"),
     deleteThread: (_, thread: vscode.CommentThread) => comments?.deleteThread(thread),
+    deleteResolvedThreads,
+    clearReview,
     askAgent: (m, reply: vscode.CommentReply) => comments && askAgent(m, comments, reply, services),
   };
   for (let [name, handler] of Object.entries(commands)) {

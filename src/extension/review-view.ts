@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { getErrorMessage } from "../core/files";
 import { getViewGroupId } from "../core/review-outline";
 import { parseViewMessage, renderReviewViewBody } from "../core/review-view-html";
+import { deleteThreadIfConfirmed } from "./delete-commands";
 import { openFileDiff, openGroupChanges } from "./diff-commands";
 import { BranchReviewModel } from "./model";
 import { ThreadNavigator } from "./thread-navigation";
@@ -86,8 +87,11 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
 </html>`;
   }
 
-  /** Carries out a request from the view's script, if parseViewMessage accepts it. */
-  private async handleMessage(message: unknown): Promise<void> {
+  /**
+   * Carries out a request from the view's script, if parseViewMessage accepts it. Public for
+   * scripts/smoke-test.ts.
+   */
+  async handleMessage(message: unknown): Promise<void> {
     let { model, navigator } = this;
     let request = model && parseViewMessage(message, model.snapshot.outline);
     if (model && navigator && request) {
@@ -104,6 +108,8 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
           return void await vscode.window.showTextDocument(vscode.Uri.file(model.getFullPath(request.file.path)));
         case "revealThread":
           return navigator.revealThread(request.thread.thread.id, getViewGroupId(request.section, request.file));
+        case "deleteThread":
+          return deleteThreadIfConfirmed(model, request.thread.thread.id);
       }
     }
   }

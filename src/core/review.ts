@@ -216,6 +216,42 @@ export function getThread(review: Review, threadId: string): ReviewThread {
   return thread;
 }
 
+/** Gets the ids of a review's resolved threads (none if there is no review). */
+export function getResolvedThreadIds(review: Review | undefined): string[] {
+  return review?.threads.filter(t => t.status === "resolved").map(t => t.id) ?? [];
+}
+
+/** Removes the threads with the given ids, and their comments, from `review` (in place). */
+export function deleteThreads(review: Review, threadIds: readonly string[]): void {
+  review.threads = review.threads.filter(t => !threadIds.includes(t.id));
+}
+
+/**
+ * Removes the threads, sessions, summary and groups of related changes from `review` (in place),
+ * so that it is like a new review; keeps its branch, base branch and merge-base.
+ */
+export function clearReviewContent(review: Review): void {
+  review.threads = [];
+  review.sessions = [];
+  delete review.summary;
+  delete review.changeGroups;
+}
+
+/**
+ * Lists what clearReviewContent would remove from a review, e.g. `["2 threads (5 comments)", "the
+ * review summary"]`; empty if the review is like a new one.
+ */
+export function describeReviewContent(review: Review): string[] {
+  let { threads, sessions, summary, changeGroups } = review;
+  let commentCount = threads.reduce((sum, t) => sum + t.comments.length, 0);
+  return [
+    threads.length > 0 ? `${formatCount(threads.length, "thread")} (${formatCount(commentCount, "comment")})` : "",
+    summary ? "the review summary" : "",
+    changeGroups ? `${formatCount(changeGroups.groups.length, "group")} of related changes` : "",
+    sessions.length > 0 ? `${formatCount(sessions.length, "recorded agent session")}, which Ask Agent can fork` : "",
+  ].filter(text => text !== "");
+}
+
 /** Adds a session to `review.sessions` (in place) unless a session with that id is there. */
 export function recordSession(review: Review, sessionId: string, cwd: string, role: SessionRole,
   agent: IntegrationId): void {

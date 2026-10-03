@@ -29,6 +29,13 @@ VS Code's own chat agent) rather than humans.
 - Review comments appear as comment threads (VS Code Comments API) in the diff editor, in normal
   editors, and in the Comments panel. You can reply, resolve, reopen, delete, and start new threads
   on changed files.
+- To delete a thread, click the trash button in its title bar, or the trash button that its row in
+  the Branch Review view shows when you hover over it. **Delete Resolved Threads** (a button in the
+  view's header, and in the view's `...` menu) deletes all resolved threads. **Clear Review** (view
+  `...` menu) deletes everything in the branch's review except its base branch: threads, summary,
+  groups of related changes, and the recorded agent sessions (so Ask Agent can no longer fork the
+  review session). Each asks for confirmation first, and each is also a command in the Command
+  Palette.
 - **Switch Branch…** opens the worktree of the branch you pick, creating a worktree first if there
   is none. Reviews are stored per branch, so each worktree window shows its own branch's review.
 - Agents (Claude Code, Codex, VS Code's chat) post review findings as threads through the
@@ -109,8 +116,9 @@ branches or stashes.
 
 1. Open a git repo (or one of its worktrees) in VS Code and click the Branch Review icon in the
    Activity Bar. The view's header shows `<branch> vs <baseRef> <merge-base>` and buttons for
-   **Change Base Branch…**, **Switch Branch…**, **Open All Changes**, **Refresh** and **Settings and
-   Integrations**. Hover over a file for buttons that open the file itself or its whole-file diff.
+   **Change Base Branch…**, **Switch Branch…**, **Open All Changes**, **Delete Resolved Threads**,
+   **Refresh** and **Settings and Integrations**. Hover over a file for buttons that open the file
+   itself or its whole-file diff, and over a thread for a button that deletes it.
    The view is a webview. As in VS Code's trees, Tab moves to the list of files as a whole, and the
    arrow keys, Home, End and Enter work on its rows. The view keeps the groups and files you
    collapsed while VS Code runs.
@@ -313,9 +321,9 @@ The extension and MCP server do not modify any tracked files in your repos. They
 - `npm run typecheck`, `npm run package`
 - `npm run sample-review -- <repo> [--force]`: writes a sample review for the repo's current branch
 - `npm run smoke-test -- <repo>`: runs `scripts/smoke-test.ts` inside VS Code (throwaway profile)
-  against a repo that has a sample review. With `BRS_SCREENSHOT_DIR=<folder>` it also saves
-  screenshots of the Extension Development Host window (Windows only) and the HTML of the panel
-  and the Branch Review view. It
+  against a repo that has a sample review, which it leaves as it found it. With
+  `BRS_SCREENSHOT_DIR=<folder>` it also saves screenshots of the Extension Development Host window
+  (Windows only) and the HTML of the panel and the Branch Review view. It
   checks the VS Code Chat integration without a chat request: VS Code starts the MCP server and
   lists its tools, registers the skill and agent, and Ask Agent's VS Code Chat choice runs the chat
   commands (which the check intercepts) with the expected arguments. With `BRS_SMOKE_ASK_AGENT=1`

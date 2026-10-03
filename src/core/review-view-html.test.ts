@@ -49,6 +49,15 @@ describe("renderReviewViewBody", () => {
       expect(html).toContain(`<code title="merge-base 0123456789abcdef">01234567</code>`);
     });
 
+  it("gives each thread row a Delete Thread button and the header a Delete Resolved Threads button", () => {
+    let html = render();
+    let threadRows = html.match(/<div class="row thread-row[^]*?<\/div>/g) ?? [];
+    expect(threadRows).toHaveLength(2);
+    for (let row of threadRows)
+      expect(row).toMatch(/<button [^>]*data-action="deleteThread" title="Delete Thread"/);
+    expect(html).toMatch(/<button [^>]*data-action="runCommand" data-command="deleteResolvedThreads"/);
+  });
+
   it("shows notices for a missing merge-base, a detached HEAD and stale groups", () => {
     let outline = { ...createOutline(), isStale: true };
     let html = render(outline, { mergeBase: undefined, mergeBaseError: "no develop", branch: undefined });
@@ -67,6 +76,8 @@ describe("parseViewMessage", () => {
         section: { title: "1. Group " + evil } });
     expect(parseViewMessage({ action: "openFile", path: "b.cs" }, outline))
       .toMatchObject({ action: "openFile", file: { path: "b.cs" }, section: { title: "Ungrouped" } });
+    expect(parseViewMessage({ action: "deleteThread", group: "g1", path: "a.cs", thread: "t2" }, outline))
+      .toMatchObject({ action: "deleteThread", thread: { thread: { id: "t2" } } });
     expect(parseViewMessage({ action: "openGroup", group: "g1" }, outline)).toMatchObject({ action: "openGroup" });
     expect(parseViewMessage({ action: "runCommand", command: "refresh" }, outline))
       .toEqual({ action: "runCommand", commandId: "refresh" });
@@ -78,6 +89,9 @@ describe("parseViewMessage", () => {
       { action: "openFile", path: "b.cs", group: "g1" }, { action: "openFile", path: ["a.cs"], group: "g1" },
       { action: "revealThread", group: "g1", path: "a.cs", thread: "missing" },
       { action: "revealThread", path: "b.cs", thread: "t1" }, { action: "openGroup", group: "nope" },
+      { action: "deleteThread", group: "g1", path: "a.cs", thread: "missing" },
+      { action: "deleteThread", group: "g1", path: "a.cs" }, { action: "deleteThread", path: "b.cs", thread: "t1" },
+      { action: "deleteThread", group: "g1", path: "a.cs", thread: ["t1"] },
       { action: "openGroup", group: { toString: () => "g1" } }])
       expect(parseViewMessage(message, outline), JSON.stringify(message)).toBeUndefined();
   });

@@ -2,7 +2,7 @@
   "name": "branch-review-studio",
   "displayName": "Branch Review Studio",
   "description": "Review a branch's working tree against its merge-base with develop, with comment threads exchanged with AI agents (Claude Code, Codex or VS Code's chat).",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "qwertie",
   "private": true,
   "license": "Unlicense",
@@ -169,6 +169,17 @@
         "icon": "$(trash)"
       },
       {
+        "command": "branchReviewStudio.deleteResolvedThreads",
+        "title": "Delete Resolved Threads",
+        "category": "Branch Review Studio",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "branchReviewStudio.clearReview",
+        "title": "Clear Review",
+        "category": "Branch Review Studio"
+      },
+      {
         "command": "branchReviewStudio.askAgent",
         "title": "Ask Agent",
         "category": "Branch Review Studio",
@@ -202,6 +213,16 @@
           "command": "branchReviewStudio.fetchBase",
           "when": "view == branchReviewStudio.files",
           "group": "1_base"
+        },
+        {
+          "command": "branchReviewStudio.deleteResolvedThreads",
+          "when": "view == branchReviewStudio.files",
+          "group": "2_delete@1"
+        },
+        {
+          "command": "branchReviewStudio.clearReview",
+          "when": "view == branchReviewStudio.files",
+          "group": "2_delete@2"
         }
       ],
       "editor/title": [

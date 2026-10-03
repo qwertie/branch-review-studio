@@ -394,3 +394,19 @@ per name and prefers user/workspace copies over an extension's; `_meta["vscode.c
 identifies the chat. Assumptions: the Branch Reviewer agent may read, search, run commands, edit,
 keep a to-do list and start subagents; Ask Agent offers no fork when the relevant review session
 ran in VS Code chat.
+
+## S11. Follow-up: deleting threads
+
+### User
+
+> 1. I'm impressed that it can even show more than one review. No need for. Forking an older one.
+> 2. I am surprised to hear that there are threads on deleted lines. I will let you know if I
+> notice anything weird. Please push now.
+>
+> I guess we need a way to delete threads, huh?
+
+Answer: all of P1 (delete button on sidebar thread rows), P2 (Delete Resolved Threads), P3 (Clear
+Review) and P4 (smoke tests clean up after themselves). Assumptions: Clear Review keeps the base
+branch and merge-base; deletions recheck the stored review inside the lock, so changes an agent
+makes while a confirmation is open aren't deleted unseen; the row button is mouse-only, like the
+file rows' buttons.

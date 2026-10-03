@@ -1,7 +1,7 @@
 // Smoke test that runs inside a VS Code extension host (see scripts/run-smoke-test.mjs). It checks
 // what unit tests can't: activation, the snapshot of a real repo, diff editors and comment saving.
 // It prints PASS/FAIL lines; the workspace must be a repo with a sample review (see
-// create-sample-review.ts). It adds one user thread to that review and deletes it again.
+// create-sample-review.ts). Every check that changes that review restores it afterwards.
 import * as assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -11,7 +11,10 @@ import { AgentRunMode, AgentSessionMode, getAgentChoices } from "../src/core/age
 import { createAnchor } from "../src/core/anchoring";
 import { ChangedFile, getBaseBranchChoices, getFileAtRevision, listBranches, MergeBaseInfo } from "../src/core/git";
 import { applyHunks, DiffHunk, readDiffHunks } from "../src/core/hunks";
-import { addThread, createReview, findLatestSession, IntegrationId } from "../src/core/review";
+import {
+  addComment, addThread, createReview, findLatestSession, formatCount, getResolvedThreadIds, getThread, IntegrationId,
+  recordSession, Review,
+} from "../src/core/review";
 import { listChangesEntries, listThreadVisits, ThreadVisit } from "../src/core/review-outline";
 import { ReviewStore } from "../src/core/store";
 import { ChatOpenArgs } from "../src/core/vscode-chat";
@@ -118,7 +121,9 @@ export async function run(): Promise<void> {
         }
         assert.equal(model.snapshot.mergeBase?.mergeBaseSha, snapshot.mergeBase?.mergeBaseSha);
       });
+    await checkDeletion(model, exports!, check);
     if (process.env.BRS_SMOKE_ASK_AGENT) {
+      let previous = model.snapshot.review!;
       await check("Ask Agent (fork, background) puts Claude's answer in the thread", async () => {
         let added = await askAgentOnNewThread(model, getChoiceIndex(model, "claude", "fork", "background"),
           "Smoke test: in one short sentence, what is this line about? Answer via review_reply.");
@@ -140,7 +145,10 @@ export async function run(): Promise<void> {
         assert.equal(terminal.exitStatus, undefined, `claude exited: ${JSON.stringify(terminal.exitStatus)}`);
         if (process.env.BRS_SCREENSHOT_DIR)
           captureWindow(path.join(process.env.BRS_SCREENSHOT_DIR, "ask-agent-interactive.png"));
+        // Ends Claude, so that it can't write to the review after removeAddedThreadsAndSessions
+        terminal.dispose();
       });
+      await removeAddedThreadsAndSessions(model, previous);
     }
     if (process.env.BRS_SMOKE_CODEX)
       await checkCodex(model, check);
@@ -188,14 +196,13 @@ async function checkCodex(model: Model, check: (name: string, action: () => Prom
     await vscode.workspace.getConfiguration("branchReviewStudio").update("codexPath",
       process.env.BRS_SMOKE_CODEX_PATH, vscode.ConfigurationTarget.Global);
   }
-  let originalSessionIds = new Set(model.snapshot.review!.sessions.map(s => s.sessionId));
-  let addedThreadIds: string[] = [];
+  let previous = model.snapshot.review!;
+  let originalSessionIds = new Set(previous.sessions.map(s => s.sessionId));
   let reviewSessionId: string | undefined;
   await check("Ask Agent (Codex, fresh, background): Codex answers and its thread id is recorded", async () => {
     let added = await askAgentOnNewThread(model, getChoiceIndex(model, "codex", "fresh", "background"),
       "Smoke test: call the review_begin tool without arguments, then answer this thread via review_reply with "
       + "the single word 'begun'.");
-    addedThreadIds.push(added.id);
     let sessions = model.snapshot.review!.sessions.filter(s => !originalSessionIds.has(s.sessionId));
     console.log(`INFO thread comments: ${JSON.stringify(added.comments.map(c => [c.author.name, c.body]))}`);
     console.log(`INFO new sessions: ${JSON.stringify(sessions)}`);
@@ -207,7 +214,6 @@ async function checkCodex(model: Model, check: (name: string, action: () => Prom
     assert.equal(findLatestSession(model.snapshot.review!, "review")?.agent, "codex");
     let added = await askAgentOnNewThread(model, getChoiceIndex(model, "codex", "fork", "background"),
       "Smoke test: in one short sentence, which tool did you call in the previous turn? Answer via review_reply.");
-    addedThreadIds.push(added.id);
     let answer = added.comments.at(-1)!;
     console.log(`INFO thread comments: ${JSON.stringify(added.comments.map(c => [c.author.name, c.body]))}`);
     assert.equal(answer.author.name, "Codex", "no Codex answer");
@@ -215,9 +221,122 @@ async function checkCodex(model: Model, check: (name: string, action: () => Prom
     assert.ok(model.snapshot.review!.sessions.some(s => s.sessionId === answer.sessionId && s.agent === "codex"
       && s.role === "followup"), "the fork was not recorded as a Codex follow-up session");
   });
+  await removeAddedThreadsAndSessions(model, previous);
+}
+
+/**
+ * Removes the threads and sessions that the review has but `previous` (an earlier state of the
+ * review) doesn't, e.g. those that Ask Agent added.
+ */
+async function removeAddedThreadsAndSessions(model: Model, previous: Review) {
+  let threadIds = previous.threads.map(t => t.id);
+  let sessionIds = previous.sessions.map(s => s.sessionId);
   await model.modifyReview(review => {
-    review.threads = review.threads.filter(t => !addedThreadIds.includes(t.id));
-    review.sessions = review.sessions.filter(s => originalSessionIds.has(s.sessionId));
+    review.threads = review.threads.filter(t => threadIds.includes(t.id));
+    review.sessions = review.sessions.filter(s => sessionIds.includes(s.sessionId));
+  });
+}
+
+/**
+ * Adds an open thread with two comments and a resolved thread, then checks the Branch Review
+ * view's Delete Thread button, Delete Resolved Threads and Clear Review, answering their
+ * confirmations by replacing showWarningMessage, and writing to the review while they are open as
+ * an agent might. Then restores the review from a copy of its JSON file.
+ */
+async function checkDeletion(model: Model, exports: BranchReviewStudioExports,
+  check: (name: string, action: () => Promise<void>) => Promise<void>) {
+  let branch = model.snapshot.branch!;
+  let backup = JSON.parse(fs.readFileSync(model.store.getReviewPath(branch), "utf8")) as Review;
+  /** The messages that the extension showed, each with its detail */
+  let messages: string[] = [];
+  /** The button that the replaced showWarningMessage clicks; undefined = Cancel */
+  let answer: string | undefined;
+  /** Modifies the stored review while the replaced showWarningMessage is open, if set */
+  let mutateWhileConfirming: ((review: Review) => void) | undefined;
+  let { showWarningMessage, showInformationMessage, showErrorMessage } = vscode.window;
+  vscode.window.showWarningMessage = (async (message: string, options?: vscode.MessageOptions) => {
+    messages.push(`${message}\n${options?.detail}`);
+    let mutate = mutateWhileConfirming;
+    if (mutate) {
+      await model.store.updateReview(branch, review => {
+        mutate(review!);
+        return review;
+      });
+    }
+    return answer;
+  }) as typeof showWarningMessage;
+  vscode.window.showInformationMessage = vscode.window.showErrorMessage = (async (message: string) => {
+    messages.push(message);
+  }) as typeof showInformationMessage;
+  try {
+    let openId = "", resolvedId = "";
+    await model.modifyReview(review => {
+      let { file, side, anchor } = review.threads[0];
+      let author = { kind: "user" as const, name: "Smoke Test" };
+      let thread = addThread(review, { file, side, anchor, author, body: "Smoke test: a thread to delete" });
+      addComment(review, thread, author, "Smoke test: its second comment");
+      openId = thread.id;
+      thread = addThread(review, { file, side, anchor, author, body: "Smoke test: a resolved thread" });
+      thread.status = "resolved";
+      resolvedId = thread.id;
+    });
+    await check("the view's Delete Thread button deletes its thread if the user confirms", async () => {
+      let threadRow = exports.getReviewViewHtml()
+        .match(new RegExp(`<div class="row thread-row[^>]*data-thread="${openId}"[^]*?</div>`))?.[0];
+      assert.match(threadRow ?? "", /data-action="deleteThread"/);
+      let visit = listThreadVisits(model.snapshot.outline).find(v => v.thread.thread.id === openId)!;
+      let message = { action: "deleteThread", group: visit.section.group?.id, path: visit.file.path, thread: openId };
+      for (answer of [undefined, "Delete"])
+        await exports.handleReviewViewMessage(message);
+      assert.deepEqual(messages, Array(2).fill("Delete this thread and its 2 comments?\nThis can't be undone."));
+      assert.equal(model.snapshot.review!.threads.some(t => t.id === openId), false, "the thread is still there");
+      assert.ok(!exports.getReviewViewHtml().includes(openId), "the view still shows the thread");
+    });
+    await check("Delete Resolved Threads deletes the resolved threads if the user confirms, but not one that is "
+      + "reopened while it asks; or says there are none", async () => {
+      let resolvedCount = getResolvedThreadIds(model.snapshot.review).length;
+      let threadCount = model.snapshot.review!.threads.length;
+      mutateWhileConfirming = review => getThread(review, resolvedId).status = "open";
+      await vscode.commands.executeCommand("branchReviewStudio.deleteResolvedThreads");
+      mutateWhileConfirming = undefined;
+      await vscode.commands.executeCommand("branchReviewStudio.deleteResolvedThreads");
+      assert.deepEqual(messages.slice(-2), [`Delete ${formatCount(resolvedCount, "resolved thread")}?\nTheir `
+        + "comments are deleted too. This can't be undone.", "The review has no resolved threads."]);
+      assert.equal(model.snapshot.review!.threads.length, threadCount - resolvedCount + 1);
+      assert.equal(getThread(model.snapshot.review!, resolvedId).status, "open");
+    });
+    await check("Clear Review empties the review but keeps its base branch, unless the review changes while it "
+      + "asks; or says there is nothing to clear", async () => {
+      answer = "Clear Review";
+      mutateWhileConfirming = review => recordSession(review, "smoke-test-session", "", "review", "claude");
+      await vscode.commands.executeCommand("branchReviewStudio.clearReview");
+      mutateWhileConfirming = undefined;
+      assert.match(messages.at(-1)!, /could not clear the review: the review changed/);
+      await model.refresh();
+      assert.ok(model.snapshot.review!.threads.length > 0, "Clear Review deleted threads after the review changed");
+      for (let i = 0; i < 2; i++)
+        await vscode.commands.executeCommand("branchReviewStudio.clearReview");
+      console.log(`INFO Clear Review messages: ${JSON.stringify(messages.slice(-2))}`);
+      assert.ok(messages.at(-2)!.startsWith(`Clear the review of branch ${branch}?\nThis deletes:\n- `),
+        messages.at(-2));
+      assert.equal(messages.at(-1), "The current branch has no review to clear.");
+      let { threads, sessions, summary, changeGroups, baseBranch } = model.snapshot.review!;
+      assert.deepEqual({ threads, sessions, summary, changeGroups, baseBranch },
+        { threads: [], sessions: [], summary: undefined, changeGroups: undefined, baseBranch: backup.baseBranch });
+      assert.ok(!exports.getReviewViewHtml().includes("thread-row"), "the view still shows threads");
+      if (process.env.BRS_SCREENSHOT_DIR) {
+        await vscode.commands.executeCommand("workbench.view.extension.branchReviewStudio");
+        await delay(1500);
+        captureWindow(path.join(process.env.BRS_SCREENSHOT_DIR, "review-cleared.png"));
+      }
+    });
+  } finally {
+    Object.assign(vscode.window, { showWarningMessage, showInformationMessage, showErrorMessage });
+    await model.store.updateReview(branch, () => backup);
+    await model.refresh();
+  }
+  await check("restores the review after the deletion checks", async () => {
+    assert.deepEqual(model.snapshot.review!.threads, backup.threads);
   });
 }
 

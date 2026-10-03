@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  addComment, addThread, createReview, findLatestSession, getAuthorLabel, getThread, recordSession,
+  addComment, addThread, clearReviewContent, createReview, deleteThreads, describeReviewContent, findLatestSession,
+  getAuthorLabel, getResolvedThreadIds, getThread, recordSession, Review,
 } from "./review";
 
 const anchor = { startLine: 1, endLine: 1, lineText: "x", contextBefore: [], contextAfter: [] };
@@ -34,4 +35,43 @@ describe("review model", () => {
     expect(findLatestSession(review, "review")?.sessionId).toBe("s2");
     expect(findLatestSession(review, "followup")).toBeUndefined();
   });
+
+  it("getResolvedThreadIds finds the resolved threads, which deleteThreads removes", () => {
+    let review = createFullReview();
+    let resolvedIds = getResolvedThreadIds(review);
+
+    expect(resolvedIds).toEqual([review.threads[1].id, review.threads[2].id]);
+    expect(getResolvedThreadIds(undefined)).toEqual([]);
+    deleteThreads(review, resolvedIds);
+    expect(review.threads.map(t => t.comments[0].body)).toEqual(["open"]);
+  });
+
+  it("clearReviewContent leaves a review like a new one with the same base; describeReviewContent lists what it "
+    + "removes", () => {
+    let review = createFullReview();
+    let { branch, baseBranch, mergeBaseSha } = review;
+
+    expect(describeReviewContent(review)).toEqual(["3 threads (4 comments)", "the review summary",
+      "1 group of related changes", "1 recorded agent session, which Ask Agent can fork"]);
+    clearReviewContent(review);
+    expect(review).toEqual({ ...createReview(branch, baseBranch, mergeBaseSha),
+      createdAt: review.createdAt, updatedAt: review.updatedAt });
+    expect(describeReviewContent(review)).toEqual([]);
+  });
 });
+
+/** Creates a review with a summary, a group, a session and threads "open", "resolved" and "resolved too". */
+function createFullReview(): Review {
+  let review = createReview("b", "main", "abc");
+  let author = { kind: "agent" as const, name: "Claude" };
+  for (let body of ["open", "resolved", "resolved too"]) {
+    let thread = addThread(review, { file: "a.txt", side: "modified", anchor, author, body });
+    thread.status = body === "open" ? "open" : "resolved";
+  }
+  addComment(review, review.threads[0], author, "reply");
+  recordSession(review, "s1", "D:/x", "review", "claude");
+  review.summary = "Summary";
+  review.changeGroups = { mergeBaseSha: "abc", createdAt: "", groups: [{ id: "g", name: "G", summary: "" }],
+    files: [] };
+  return review;
+}
