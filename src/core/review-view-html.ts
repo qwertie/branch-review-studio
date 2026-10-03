@@ -59,7 +59,7 @@ export function renderReviewViewBody(data: ReviewViewData): string {
   ];
   let tree = outline.sections.map(section => section.group ? renderGroup(outline, section)
     : section.files.map(file => renderFile(section, file, 1)).join("")).join("");
-  return `${renderHeader(data)}${notices.filter(n => n).join("")}
+  return `${renderHeader(data)}${notices.filter(n => n).join("")}${renderReviewSummary(data.summary)}
 <div class="tree" role="tree" aria-label="Changed files and review threads">${tree}</div>`;
 }
 
@@ -103,15 +103,21 @@ function renderHeader(data: ReviewViewData): string {
     : `${escapeHtml(data.baseBranch)} <span class="error">(no merge-base)</span>`;
   let buttons = headerCommands.map(c => `<button class="icon-button codicon codicon-${c.icon}" `
     + `data-action="runCommand" data-command="${c.id}" title="${c.title}" aria-label="${c.title}"></button>`).join("");
-  let summary = data.summary ? `<div class="node review-summary collapsed" data-key="summary">
-<div class="row" role="button" tabindex="0" aria-expanded="false" data-toggle>${twistie}Review summary</div>
-<div class="children markdown">${renderMarkdownSubset(data.summary)}</div></div>` : "";
   return `<div class="header">
 <div class="branch"><span class="codicon codicon-git-compare"></span>`
     + `<span><b>${branch}</b> <span class="dim">vs</span> ${base}</span></div>
 <div class="toolbar" role="toolbar" aria-label="Branch Review commands">${buttons}
-<label class="filter"><input type="checkbox" id="unresolvedOnly"> Unresolved only</label></div>
-${summary}</div>`;
+<label class="filter"><input type="checkbox" id="unresolvedOnly"> Unresolved only</label></div></div>`;
+}
+
+/**
+ * Renders the review's collapsible summary below the sticky header, so that expanding it pushes the
+ * tree down instead of growing the header over it.
+ */
+function renderReviewSummary(summary: string | undefined): string {
+  return summary ? `<div class="node review-summary collapsed" data-key="summary">
+<div class="row" role="button" tabindex="0" aria-expanded="false" data-toggle>${twistie}Review summary</div>
+<div class="children markdown">${renderMarkdownSubset(summary)}</div></div>` : "";
 }
 
 function renderGroup(outline: ReviewOutline, section: OutlineSection): string {

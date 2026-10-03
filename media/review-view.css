@@ -16,7 +16,7 @@ code {
 .dim { color: var(--vscode-descriptionForeground); }
 .error { color: var(--vscode-errorForeground); }
 
-/* Header: branch, buttons, filter, review summary */
+/* Header: branch, buttons, filter; then the review summary */
 .header {
   position: sticky;
   top: 0;
@@ -59,8 +59,11 @@ code {
 .notice { margin: 0; padding: 4px 12px; color: var(--vscode-descriptionForeground); }
 .notice.error { color: var(--vscode-errorForeground); }
 .notice.warning, .tag.warning { color: var(--vscode-editorWarning-foreground); }
-.review-summary { margin-top: 4px; }
-.review-summary > .row { padding-left: 0; color: var(--vscode-descriptionForeground); }
+.review-summary {
+  padding: 2px 0 4px 8px;
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border));
+}
+.review-summary > .row { padding-left: 4px; color: var(--vscode-descriptionForeground); }
 .review-summary > .children { padding: 0 4px 2px 22px; }
 
 /* Tree rows */
