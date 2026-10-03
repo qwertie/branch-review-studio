@@ -1,0 +1,2 @@
+- Read @AGENTS.md
+- Before writing code, read the BPP skill: .claude/skills/barreleye-programming-process/SKILL.md

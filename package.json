@@ -1,0 +1,249 @@
+{
+  "name": "branch-review-studio",
+  "displayName": "Branch Review Studio",
+  "description": "Review a branch's working tree against its merge-base with develop, with comment threads exchanged with Claude Code agents.",
+  "version": "0.1.0",
+  "publisher": "barreleye",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.140.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "activationEvents": [
+    "workspaceContains:.git"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "branchReviewStudio",
+          "title": "Branch Review",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "branchReviewStudio": [
+        {
+          "id": "branchReviewStudio.files",
+          "name": "Branch Review"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "branchReviewStudio.refresh",
+        "title": "Refresh",
+        "category": "Branch Review Studio",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "branchReviewStudio.openAllChanges",
+        "title": "Open All Changes",
+        "category": "Branch Review Studio",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "branchReviewStudio.openFileDiff",
+        "title": "Open File Diff",
+        "category": "Branch Review Studio",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "branchReviewStudio.openFile",
+        "title": "Open File",
+        "category": "Branch Review Studio",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "branchReviewStudio.openThread",
+        "title": "Go to Thread",
+        "category": "Branch Review Studio"
+      },
+      {
+        "command": "branchReviewStudio.switchBranch",
+        "title": "Switch Branch…",
+        "category": "Branch Review Studio",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "branchReviewStudio.fetchBase",
+        "title": "Fetch Base Branch",
+        "category": "Branch Review Studio",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "branchReviewStudio.createThread",
+        "title": "Add Comment",
+        "category": "Branch Review Studio"
+      },
+      {
+        "command": "branchReviewStudio.reply",
+        "title": "Reply",
+        "category": "Branch Review Studio"
+      },
+      {
+        "command": "branchReviewStudio.resolveThread",
+        "title": "Resolve",
+        "category": "Branch Review Studio",
+        "icon": "$(check)"
+      },
+      {
+        "command": "branchReviewStudio.unresolveThread",
+        "title": "Reopen",
+        "category": "Branch Review Studio",
+        "icon": "$(issue-reopened)"
+      },
+      {
+        "command": "branchReviewStudio.deleteThread",
+        "title": "Delete Thread",
+        "category": "Branch Review Studio",
+        "icon": "$(trash)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "branchReviewStudio.openAllChanges",
+          "when": "view == branchReviewStudio.files",
+          "group": "navigation@1"
+        },
+        {
+          "command": "branchReviewStudio.switchBranch",
+          "when": "view == branchReviewStudio.files",
+          "group": "navigation@2"
+        },
+        {
+          "command": "branchReviewStudio.refresh",
+          "when": "view == branchReviewStudio.files",
+          "group": "navigation@3"
+        },
+        {
+          "command": "branchReviewStudio.fetchBase",
+          "when": "view == branchReviewStudio.files",
+          "group": "1_base"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "branchReviewStudio.openFile",
+          "when": "view == branchReviewStudio.files && viewItem == brsFile",
+          "group": "inline@1"
+        },
+        {
+          "command": "branchReviewStudio.openFileDiff",
+          "when": "view == branchReviewStudio.files && viewItem == brsFile",
+          "group": "inline@2"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "branchReviewStudio.createThread",
+          "when": "commentController == branch-review-studio && commentThreadIsEmpty",
+          "group": "inline@1"
+        },
+        {
+          "command": "branchReviewStudio.reply",
+          "when": "commentController == branch-review-studio && !commentThreadIsEmpty",
+          "group": "inline@1"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "branchReviewStudio.resolveThread",
+          "when": "commentController == branch-review-studio && commentThread == brsOpen",
+          "group": "inline@1"
+        },
+        {
+          "command": "branchReviewStudio.unresolveThread",
+          "when": "commentController == branch-review-studio && commentThread == brsResolved",
+          "group": "inline@1"
+        },
+        {
+          "command": "branchReviewStudio.deleteThread",
+          "when": "commentController == branch-review-studio && commentThread =~ /^brs(Open|Resolved)$/",
+          "group": "inline@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "branchReviewStudio.openFileDiff",
+          "when": "false"
+        },
+        {
+          "command": "branchReviewStudio.openFile",
+          "when": "false"
+        },
+        {
+          "command": "branchReviewStudio.openThread",
+          "when": "false"
+        },
+        {
+          "command": "branchReviewStudio.createThread",
+          "when": "false"
+        },
+        {
+          "command": "branchReviewStudio.reply",
+          "when": "false"
+        },
+        {
+          "command": "branchReviewStudio.resolveThread",
+          "when": "false"
+        },
+        {
+          "command": "branchReviewStudio.unresolveThread",
+          "when": "false"
+        },
+        {
+          "command": "branchReviewStudio.deleteThread",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Branch Review Studio",
+      "properties": {
+        "branchReviewStudio.baseBranch": {
+          "type": "string",
+          "default": "develop",
+          "description": "Branch to compare against. The diff base is `git merge-base origin/<baseBranch> HEAD` if origin/<baseBranch> exists, else `git merge-base <baseBranch> HEAD`."
+        },
+        "branchReviewStudio.openWorktreeInNewWindow": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether Switch Branch opens the branch's worktree in a new window instead of the current one."
+        },
+        "branchReviewStudio.worktreeRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Folder in which Switch Branch creates new worktrees. Empty means a sibling folder of the main worktree named `<repoName>.worktrees`."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "package": "npm run typecheck && node esbuild.mjs --production && vsce package --no-dependencies --allow-missing-repository --skip-license",
+    "sample-review": "esbuild scripts/create-sample-review.ts --bundle --platform=node --format=cjs --outfile=out/create-sample-review.js && node out/create-sample-review.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/vscode": "^1.140.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "zod": "^4.6.5"
+  }
+}

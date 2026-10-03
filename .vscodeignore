@@ -1,0 +1,7 @@
+**
+!dist/extension.js
+!dist/mcp-server.js
+!media/**
+!skills/**
+!package.json
+!README.md
