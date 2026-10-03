@@ -201,3 +201,18 @@ Release notes: Branch Review Studio is a new VS Code extension for reviewing a b
 uncommitted and committed changes against `develop` with Claude Code. Claude posts review comments
 into the diff, and you can reply in a comment thread to send the question to a fork of the session
 that wrote the review. Nothing changes for coworkers who don't install it.
+
+## S5. Follow-up: base branch selector
+
+### User
+
+> I don't see a selector for switching to select a base branch. Please add that. That is an
+> interesting icon you made for the extension by the way.
+>
+> [The rest of this message asked about VS Code's AI-model features, using the Claude Code and
+> ChatGPT extensions from this extension; that research is tracked separately.]
+
+Assumptions made without asking: the choice is stored in the branch's review, never in settings;
+only branches that are local or on `origin` are offered; arbitrary refs can't be typed; when no
+merge-base exists, clicking the header row opens Change Base Branch; Fetch Base Branch now also
+stores the new merge-base in an existing review (second-pass finding F3).

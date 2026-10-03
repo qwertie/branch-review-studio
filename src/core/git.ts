@@ -110,6 +110,19 @@ export async function listBranches(repoRoot: string): Promise<BranchInfo[]> {
 }
 
 /**
+ * Gets the branch names offered by Change Base Branch: `currentBase` first (even if it doesn't
+ * exist), then develop, main and master if they exist, then the other `branches` in their order.
+ * Excludes `currentBranch`, since a branch's merge-base with itself is HEAD, and branches that
+ * exist only on a remote other than origin, since findMergeBase looks only in origin.
+ */
+export function getBaseBranchChoices(branches: BranchInfo[], currentBase: string, currentBranch: string | undefined)
+  : string[] {
+  let names = branches.filter(b => b.isLocal || b.remoteRef?.startsWith("origin/")).map(b => b.name);
+  let preferredNames = ["develop", "main", "master"].filter(name => names.includes(name));
+  return [...new Set([currentBase, ...preferredNames, ...names])].filter(name => name !== currentBranch);
+}
+
+/**
  * Creates a worktree at `worktreePath` with `branch` checked out. For a remote-only branch, it
  * creates a local branch of the same name that tracks the remote branch.
  */

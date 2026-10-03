@@ -47,7 +47,11 @@ export async function openThread(model: BranchReviewModel, threadId: string): Pr
   }
 }
 
-/** Runs `git fetch origin <baseBranch>`, then refreshes. Nothing else in the extension fetches. */
+/**
+ * Runs `git fetch origin <baseBranch>`, then refreshes. If the branch has a review, it also stores
+ * the new merge-base in it, because the MCP tools read base-side files at `review.mergeBaseSha`.
+ * Nothing else in the extension fetches.
+ */
 export async function fetchBase(model: BranchReviewModel): Promise<void> {
   let baseBranch = model.baseBranch;
   await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
@@ -58,7 +62,10 @@ export async function fetchBase(model: BranchReviewModel): Promise<void> {
       void vscode.window.showErrorMessage(getErrorMessage(e));
     }
   });
-  await model.refresh();
+  if (model.snapshot.review)
+    await model.changeBaseBranch(baseBranch);
+  else
+    await model.refresh();
 }
 
 /**

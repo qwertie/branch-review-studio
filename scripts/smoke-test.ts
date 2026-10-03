@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { getBaseBranchChoices, listBranches, MergeBaseInfo } from "../src/core/git";
 import { createReview } from "../src/core/review";
 import { ReviewStore } from "../src/core/store";
 import type { BranchReviewStudioExports } from "../src/extension/extension";
@@ -92,6 +93,21 @@ export async function run(): Promise<void> {
       });
       assert.equal(model.snapshot.review!.threads.length, before);
     });
+    await check("changeBaseBranch stores the base and its merge-base in the review; changing back restores them",
+      async () => {
+        let originalBase = model.baseBranch;
+        let otherBase = getBaseBranchChoices(await listBranches(model.repoRoot), originalBase, snapshot.branch)[1];
+        assert.ok(otherBase, "the test repo needs a second branch to use as a base");
+        for (let base of [otherBase, originalBase]) {
+          await model.changeBaseBranch(base);
+          let mergeBase: MergeBaseInfo | undefined = model.snapshot.mergeBase;
+          console.log(`INFO base=${base} baseRef=${mergeBase?.baseRef} mergeBase=${mergeBase?.mergeBaseSha}`);
+          assert.equal(model.snapshot.review?.baseBranch, base);
+          assert.equal(model.snapshot.review?.mergeBaseSha, mergeBase?.mergeBaseSha);
+          assert.ok(mergeBase?.baseRef.endsWith(base), `baseRef ${mergeBase?.baseRef}`);
+        }
+        assert.equal(model.snapshot.mergeBase?.mergeBaseSha, snapshot.mergeBase?.mergeBaseSha);
+      });
     if (process.env.BRS_SMOKE_ASK_AGENT) {
       await check("Ask Agent (fork, background) puts Claude's answer in the thread", async () => {
         let added = await askAgentOnNewThread(model, 1, "Smoke test: in one short sentence, what is this line "

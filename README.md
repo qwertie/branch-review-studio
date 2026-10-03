@@ -7,7 +7,7 @@ UI, except that the comment threads are exchanged with AI agents (Claude Code) r
   from `git merge-base <base> HEAD`, including uncommitted and untracked files, no matter how many
   commits the branch has. `<base>` is `origin/develop` if it exists, else `develop`. A new review
   gets its base branch from the setting `branchReviewStudio.baseBranch` (or from `review_begin`'s
-  `baseBranch` argument) and keeps it.
+  `baseBranch` argument) and keeps it until you run **Change Base Branch…**.
 - Clicking a file opens a diff editor (merge-base vs. working file). The modified side is the real
   file, so you can edit it in place. **Open All Changes** opens all files in one multi-diff editor.
 - Review comments appear as comment threads (VS Code Comments API) in the diff editor, in normal
@@ -44,11 +44,18 @@ Nothing in your repos needs to change, and coworkers who don't install it are un
 
 1. Open a git repo (or one of its worktrees) in VS Code and click the Branch Review icon in the
    Activity Bar. The header row shows `<branch> vs <baseRef> @ <merge-base>`.
-2. The extension never fetches on its own. To update the base, run **Fetch Base Branch** (view
+2. To compare against a different branch (e.g. `main` instead of `develop`), click the
+   **Change Base Branch…** button (two arrows) in the view's title bar or on the header row, and
+   pick a branch; the current base is listed first, then `develop`, `main` and `master`. The choice
+   is saved in the branch's review (which is created if needed), so it applies to this branch only,
+   and Claude Code's review tools use it too; the `branchReviewStudio.baseBranch` setting doesn't
+   change. Threads on the base side of the diff were anchored to the old merge-base, so they may
+   move or show as outdated (you're asked first if there are any).
+3. The extension never fetches on its own. To update the base, run **Fetch Base Branch** (view
    `...` menu), which runs `git fetch origin <baseBranch>`.
-3. Ask Claude Code for a review, e.g. "Review this branch and post your findings with the
+4. Ask Claude Code for a review, e.g. "Review this branch and post your findings with the
    branch-review-studio tools". The threads appear when Claude saves them.
-4. To comment, hover over a line of a changed file (either side of the diff) and click `+`.
+5. To comment, hover over a line of a changed file (either side of the diff) and click `+`.
    Type a message, then click **Reply** / **Add Comment** to just save it, or **Ask Agent** to also
    send it to Claude Code. Ask Agent offers (default first; Enter picks it): fork the review
    session in a terminal, fork it in the background, fresh session in a terminal, fresh session in
@@ -58,13 +65,13 @@ Nothing in your repos needs to change, and coworkers who don't install it are un
    the answer. Either way, Claude may call the review tools without asking permission, and the new
    session's id is recorded in the review. If Claude Code hasn't been used in that folder before,
    it first asks whether you trust the folder.
-5. To see the diff inline (interleaved) instead of side by side, use the diff editor's `...` menu >
+6. To see the diff inline (interleaved) instead of side by side, use the diff editor's `...` menu >
    **Inline View**, or set `"diffEditor.renderSideBySide": false`. VS Code has no per-editor inline
    option, so this is your own user (or workspace) setting; the extension never changes it. Note that
    VS Code already switches to inline view when the editor is narrower than
    `diffEditor.renderSideBySideInlineBreakpoint` (900px) unless
    `diffEditor.useInlineViewWhenSpaceIsLimited` is false.
-6. Sticky scroll (namespace/class/method lines pinned at the top) works in diff editors when
+7. Sticky scroll (namespace/class/method lines pinned at the top) works in diff editors when
    `editor.stickyScroll.enabled` is true (the default). For C#, the C# extension's outline gives
    the best sticky lines; without a language extension, VS Code falls back to indentation, which
    pins `{` lines in Allman-style code.

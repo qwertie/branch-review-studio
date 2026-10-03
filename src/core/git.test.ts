@@ -2,8 +2,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  addWorktree, findMergeBase, findRepoRoot, getChangedFiles, getCurrentBranch, getDefaultWorktreePath,
-  getFileAtRevision, getGitCommonDir, listBranches, listWorktrees, parseBranchRefs, parseWorktreeList,
+  addWorktree, findMergeBase, findRepoRoot, getBaseBranchChoices, getChangedFiles, getCurrentBranch,
+  getDefaultWorktreePath, getFileAtRevision, getGitCommonDir, listBranches, listWorktrees, parseBranchRefs,
+  parseWorktreeList,
 } from "./git";
 import { createTempDir, TempRepo } from "./test-helpers";
 
@@ -146,6 +147,23 @@ describe("parseBranchRefs", () => {
       { name: "feature/b", isLocal: false, remoteRef: "origin/feature/b" },
       { name: "feature/c", isLocal: false, remoteRef: "upstream/feature/c" },
     ]);
+  });
+});
+
+describe("getBaseBranchChoices", () => {
+  let branches = parseBranchRefs(["refs/heads/feature/x", "refs/heads/zeta", "refs/heads/master",
+    "refs/heads/develop", "refs/remotes/origin/develop", "refs/remotes/origin/alpha", "refs/remotes/origin/main",
+    "refs/remotes/upstream/beta"]);
+
+  it("lists the current base, then develop/main/master, then the rest, without the current branch", () => {
+    expect(getBaseBranchChoices(branches, "alpha", "feature/x"))
+      .toEqual(["alpha", "develop", "main", "master", "zeta"]);
+  });
+
+  it("lists develop once though origin/develop also exists, lists a missing current base first, and omits "
+    + "branches that exist only on a remote other than origin", () => {
+    expect(getBaseBranchChoices(branches, "release/1", "zeta"))
+      .toEqual(["release/1", "develop", "main", "master", "feature/x", "alpha"]);
   });
 });
 

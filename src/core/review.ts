@@ -15,8 +15,8 @@ export interface Review {
    */
   baseBranch: string;
   /**
-   * Merge-base commit found by the latest `review_begin` call (or when the extension created the
-   * review); the MCP tools read base-side files at this commit
+   * Merge-base commit found by the latest `review_begin` call or Change Base Branch command (or
+   * when the extension created the review); the MCP tools read base-side files at this commit
    */
   mergeBaseSha: string;
   /** ISO timestamp */

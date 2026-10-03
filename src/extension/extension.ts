@@ -4,6 +4,7 @@ import { findRepoRoot, getGitCommonDir, getGitDir } from "../core/git";
 import { ReviewStore } from "../core/store";
 import { askAgent } from "./ask-agent";
 import { BaseContentProvider, baseScheme } from "./base-content";
+import { changeBaseBranch } from "./change-base-branch";
 import { ReviewCommentController } from "./comments";
 import { fetchBase, openAllChanges, openFileDiff, openThread } from "./diff-commands";
 import { installMcpServer, installSkill, uninstall, updateInstalledServerIfOutdated } from "./install";
@@ -77,6 +78,7 @@ function registerCommands(context: vscode.ExtensionContext, model: BranchReviewM
       ? vscode.window.showTextDocument(vscode.Uri.file(m.getFullPath(node.file.path))) : undefined,
     openThread: (m, threadId: string) => openThread(m, threadId),
     switchBranch,
+    changeBaseBranch,
     fetchBase,
     createThread: (_, reply: vscode.CommentReply) => comments?.createThread(reply),
     reply: (_, reply: vscode.CommentReply) => comments?.reply(reply),

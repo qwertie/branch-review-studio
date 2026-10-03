@@ -2,7 +2,7 @@
   "name": "branch-review-studio",
   "displayName": "Branch Review Studio",
   "description": "Review a branch's working tree against its merge-base with develop, with comment threads exchanged with Claude Code agents.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "barreleye",
   "private": true,
   "license": "UNLICENSED",
@@ -70,6 +70,12 @@
         "title": "Switch Branch…",
         "category": "Branch Review Studio",
         "icon": "$(git-branch)"
+      },
+      {
+        "command": "branchReviewStudio.changeBaseBranch",
+        "title": "Change Base Branch…",
+        "category": "Branch Review Studio",
+        "icon": "$(arrow-swap)"
       },
       {
         "command": "branchReviewStudio.fetchBase",
@@ -140,9 +146,14 @@
           "group": "navigation@2"
         },
         {
-          "command": "branchReviewStudio.refresh",
+          "command": "branchReviewStudio.changeBaseBranch",
           "when": "view == branchReviewStudio.files",
           "group": "navigation@3"
+        },
+        {
+          "command": "branchReviewStudio.refresh",
+          "when": "view == branchReviewStudio.files",
+          "group": "navigation@4"
         },
         {
           "command": "branchReviewStudio.fetchBase",
@@ -151,6 +162,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "branchReviewStudio.changeBaseBranch",
+          "when": "view == branchReviewStudio.files && viewItem == brsHeader",
+          "group": "inline@1"
+        },
         {
           "command": "branchReviewStudio.openFile",
           "when": "view == branchReviewStudio.files && viewItem == brsFile",
@@ -241,7 +257,7 @@
         "branchReviewStudio.baseBranch": {
           "type": "string",
           "default": "develop",
-          "description": "Branch to compare against when the current branch has no review yet; a review keeps the base branch it was created with. The diff base is `git merge-base origin/<baseBranch> HEAD` if origin/<baseBranch> exists, else `git merge-base <baseBranch> HEAD`."
+          "description": "Branch to compare against when the current branch has no review yet; a review keeps the base branch it was created with until you run Change Base Branch…. The diff base is `git merge-base origin/<baseBranch> HEAD` if origin/<baseBranch> exists, else `git merge-base <baseBranch> HEAD`."
         },
         "branchReviewStudio.openWorktreeInNewWindow": {
           "type": "boolean",

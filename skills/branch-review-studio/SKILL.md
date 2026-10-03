@@ -13,8 +13,8 @@ ignore this skill.
 ## What is being reviewed
 
 The developer's diff is the WORKING TREE, including uncommitted and untracked files, compared with
-`git merge-base origin/develop HEAD` (or `develop` if there is no `origin/develop`), however many
-commits the branch has. To see it, run `git diff <merge-base>` plus
+the merge-base of HEAD and the review's base branch (usually `develop`; the developer can change
+it), however many commits the branch has. To see it, run `git diff <merge-base>` plus
 `git ls-files --others --exclude-standard` (review_begin reports the merge-base). Line numbers you
 post refer to the working-tree files.
 

@@ -5,7 +5,7 @@ import { getFullPath, getRepoRelativePath, readFileLines } from "../core/files";
 import {
   ChangedFile, findMergeBase, getChangedFiles, getConfigValue, getCurrentBranch, MergeBaseInfo,
 } from "../core/git";
-import { createReview, DiffSide, Review } from "../core/review";
+import { createReview, DiffSide, getBaseBranchName, Review } from "../core/review";
 import { ReviewStore } from "../core/store";
 
 /** Everything the UI shows about the current branch, computed by BranchReviewModel.refresh. */
@@ -96,6 +96,20 @@ export class BranchReviewModel implements vscode.Disposable {
       return review;
     });
     await this.refresh();
+  }
+
+  /**
+   * Makes `baseBranch` the base branch of the current branch's review (creating the review if
+   * there is none) and stores its merge-base there, for the MCP tools; then refreshes. Throws if
+   * `baseBranch` doesn't exist, has no common ancestor with HEAD, or HEAD is detached. The
+   * `branchReviewStudio.baseBranch` setting is unchanged.
+   */
+  async changeBaseBranch(baseBranch: string): Promise<void> {
+    let mergeBase = await findMergeBase(this.repoRoot, baseBranch);
+    await this.modifyReview(review => {
+      review.baseBranch = getBaseBranchName(baseBranch);
+      review.mergeBaseSha = mergeBase.mergeBaseSha;
+    });
   }
 
   /** Gets the author name of the user's comments: git's user.name, else the OS user name. */

@@ -63,15 +63,22 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeNod
 
   private createHeaderItem(): vscode.TreeItem {
     let { branch, mergeBase, review } = this.model.snapshot;
+    let baseBranch = this.model.baseBranch;
     let item = new vscode.TreeItem(branch ?? "(detached HEAD)");
     item.iconPath = new vscode.ThemeIcon("git-compare");
+    item.contextValue = "brsHeader";
     if (mergeBase) {
       item.description = `vs ${mergeBase.baseRef} @ ${mergeBase.mergeBaseSha.slice(0, 8)}`;
       item.command = { command: "branchReviewStudio.openAllChanges", title: "Open All Changes" };
+    } else {
+      item.description = `vs ${baseBranch} (no merge-base)`;
+      item.command = { command: "branchReviewStudio.changeBaseBranch", title: "Change Base Branch…" };
     }
+    let baseSource = review?.baseBranch ? "this branch's review" : "the setting `branchReviewStudio.baseBranch`";
     let tooltip = new vscode.MarkdownString(
       `**${branch ?? "detached HEAD"}** compared with \`git merge-base ${mergeBase?.baseRef ?? "?"} HEAD\``
-      + ` = \`${mergeBase?.mergeBaseSha ?? "?"}\``);
+      + ` = \`${mergeBase?.mergeBaseSha ?? "?"}\`\n\nBase branch: **${baseBranch}** (from ${baseSource}). `
+      + "To change it, click $(arrow-swap) on this row or run **Change Base Branch…**.", true);
     if (review?.summary)
       tooltip.appendMarkdown("\n\n---\n\n" + review.summary);
     item.tooltip = tooltip;

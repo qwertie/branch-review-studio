@@ -125,8 +125,9 @@ export class ReviewTools {
   /**
    * Creates the branch's review, or updates its merge-base, and records the caller as the reviewing
    * session. Existing threads are kept, so that re-running a review converges. Without
-   * `args.baseBranch`, an existing review keeps its base (the extension's `baseBranch` setting may
-   * have chosen it); a new review compares against 'develop'.
+   * `args.baseBranch`, an existing review keeps its base (which the extension's `baseBranch`
+   * setting or Change Base Branch command may have chosen); a new review compares against
+   * 'develop'.
    */
   private async beginReviewCore(target: ReviewTarget, args: { summary?: string, baseBranch?: string })
     : Promise<Review> {
