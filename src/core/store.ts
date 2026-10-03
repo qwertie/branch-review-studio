@@ -5,7 +5,7 @@ import { getErrorCode, readFileIfExists } from "./files";
 import { getBaseBranchName, Review, reviewSchemaVersion } from "./review";
 
 /** Explains, inside every file that ReviewStore writes, where the file came from. */
-const provenanceNote = "Created by Branch Review Studio (VS Code extension barreleye.branch-review-studio "
+const provenanceNote = "Created by Branch Review Studio (VS Code extension qwertie.branch-review-studio "
   + "and its MCP server). Safe to delete. Git ignores it because it is inside the .git folder.";
 
 /** If a lock file is older than this, its owner presumably crashed, so the lock is broken. */

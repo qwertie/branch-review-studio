@@ -27,7 +27,7 @@ export async function run(): Promise<void> {
     }
   };
 
-  let extension = vscode.extensions.getExtension<BranchReviewStudioExports>("barreleye.branch-review-studio");
+  let extension = vscode.extensions.getExtension<BranchReviewStudioExports>("qwertie.branch-review-studio");
   let model = (await extension?.activate())?.model;
   await check("activates and finds the repo", () => assert.ok(model, "model is undefined"));
   if (model && process.env.BRS_SMOKE_FRESH_REPO) {

@@ -3,9 +3,18 @@
   "displayName": "Branch Review Studio",
   "description": "Review a branch's working tree against its merge-base with develop, with comment threads exchanged with AI agents (Claude Code, Codex).",
   "version": "0.5.0",
-  "publisher": "barreleye",
+  "publisher": "qwertie",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "Unlicense",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qwertie/branch-review-studio.git"
+  },
+  "homepage": "https://github.com/qwertie/branch-review-studio#readme",
+  "bugs": {
+    "url": "https://github.com/qwertie/branch-review-studio/issues"
+  },
   "engines": {
     "vscode": "^1.140.0"
   },
@@ -308,7 +317,7 @@
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "package": "npm run typecheck && node esbuild.mjs --production && vsce package --no-dependencies --allow-missing-repository --skip-license",
+    "package": "npm run typecheck && node esbuild.mjs --production && vsce package --no-dependencies",
     "sample-review": "esbuild scripts/create-sample-review.ts --bundle --platform=node --format=cjs --outfile=out/create-sample-review.js && node out/create-sample-review.js",
     "smoke-test": "node scripts/run-smoke-test.mjs"
   },
