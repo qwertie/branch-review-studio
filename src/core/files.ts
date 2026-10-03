@@ -12,7 +12,7 @@ export async function readFileLines(repoRoot: string, file: string, side: DiffSi
   : Promise<string[] | undefined> {
   let text = side === "base"
     ? await getFileAtRevision(repoRoot, mergeBaseSha, file)
-    : await readFileIfExists(path.join(repoRoot, ...file.split("/")));
+    : await readFileIfExists(getFullPath(repoRoot, file));
   return text === undefined ? undefined : splitLines(text);
 }
 
@@ -21,8 +21,28 @@ export async function readFileIfExists(filePath: string): Promise<string | undef
   try {
     return await fs.readFile(filePath, "utf8");
   } catch (e) {
-    if (e instanceof Error && "code" in e && e.code === "ENOENT")
+    if (getErrorCode(e) === "ENOENT")
       return undefined;
     throw e;
   }
+}
+
+/** Converts a repo-relative path with forward slashes into an absolute native path. */
+export function getFullPath(repoRoot: string, file: string): string {
+  return path.join(repoRoot, ...file.split("/"));
+}
+
+/**
+ * Converts an absolute native path into a repo-relative path with forward slashes; returns
+ * undefined if the path is the repo root itself or outside the repo.
+ */
+export function getRepoRelativePath(repoRoot: string, fullPath: string): string | undefined {
+  let relativePath = path.relative(repoRoot, fullPath);
+  let isInside = relativePath !== "" && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
+  return isInside ? relativePath.split(path.sep).join("/") : undefined;
+}
+
+/** Gets the `code` of a Node.js system error, e.g. "ENOENT". */
+export function getErrorCode(e: unknown): string | undefined {
+  return e instanceof Error && "code" in e && typeof e.code === "string" ? e.code : undefined;
 }

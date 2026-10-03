@@ -9,8 +9,7 @@ export class TempRepo {
 
   /** Creates a repo whose first commit (on `main`) contains `files`. */
   static create(files: Record<string, string> = { "README.md": "hello\n" }): TempRepo {
-    let root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "brs-test-")));
-    let repo = new TempRepo(root);
+    let repo = new TempRepo(createTempDir());
     repo.git("init", "-q", "-b", "main");
     repo.git("config", "user.name", "Test User");
     repo.git("config", "user.email", "test@example.com");
@@ -35,6 +34,7 @@ export class TempRepo {
     }
   }
 
+  /** Stages and commits all changes; returns the new commit's SHA. */
   commitAll(message: string): string {
     this.git("add", "-A");
     this.git("commit", "-q", "-m", message);

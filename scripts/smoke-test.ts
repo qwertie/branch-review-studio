@@ -123,7 +123,10 @@ export async function run(): Promise<void> {
     throw new Error(`${failures} smoke checks failed`);
 }
 
-/** Saves screenshots of the review UI in side-by-side and inline diff modes (dev aid; agents can't see the UI). */
+/**
+ * Saves screenshots of the review UI in side-by-side and inline diff modes, so that agents can see
+ * the UI.
+ */
 async function captureScreenshots(model: NonNullable<BranchReviewStudioExports["model"]>, dir: string) {
   let thread = model.snapshot.review!.threads.reduce((a, b) => a.anchor.startLine >= b.anchor.startLine ? a : b);
   await vscode.commands.executeCommand("workbench.view.extension.branchReviewStudio");

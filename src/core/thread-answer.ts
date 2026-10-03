@@ -18,6 +18,7 @@ export interface BackgroundAnswerRequest {
   onLine: (line: string) => void;
 }
 
+/** What `answerThreadInBackground` reports about Claude's run. */
 export interface BackgroundAnswer extends BackgroundRunResult {
   /** True if the agent didn't reply via review_reply, so its final message was posted for it */
   isFallbackPosted: boolean;
@@ -42,7 +43,7 @@ export async function answerThreadInBackground(request: BackgroundAnswerRequest)
         result.sessionId ?? request.newSessionId);
       isFallbackPosted = true;
     }
-    return review;
+    return isFallbackPosted ? review : undefined;
   });
   return { ...result, isFallbackPosted };
 }

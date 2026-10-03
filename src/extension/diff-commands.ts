@@ -49,7 +49,7 @@ export async function openThread(model: BranchReviewModel, threadId: string): Pr
 
 /** Runs `git fetch origin <baseBranch>`, then refreshes. Nothing else in the extension fetches. */
 export async function fetchBase(model: BranchReviewModel): Promise<void> {
-  let baseBranch = model.baseBranchSetting;
+  let baseBranch = model.baseBranch;
   await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
     title: `Fetching origin/${baseBranch}…` }, async () => {
     try {

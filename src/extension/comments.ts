@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { AnchorLocation, createAnchor } from "../core/anchoring";
-import { addComment, addThread, DiffSide, getAuthorLabel, getThread, ReviewThread } from "../core/review";
+import { addComment, addThread, DiffSide, getAuthorLabel, getThread, ReviewThread, ThreadStatus } from "../core/review";
 import { baseScheme, getBaseUri, parseBaseUri } from "./base-content";
 import { BranchReviewModel, getErrorMessage, ReviewSnapshot } from "./model";
 
@@ -74,7 +74,7 @@ export class ReviewCommentController implements vscode.Disposable {
   }
 
   /** Sets a thread's status to resolved or open. */
-  async setThreadStatus(vscodeThread: vscode.CommentThread, status: ReviewThread["status"]): Promise<void> {
+  async setThreadStatus(vscodeThread: vscode.CommentThread, status: ThreadStatus): Promise<void> {
     let threadId = this.threadIds.get(vscodeThread);
     if (threadId !== undefined) {
       await this.saveOrShowError(() => this.model.modifyReview(review => {
@@ -109,17 +109,17 @@ export class ReviewCommentController implements vscode.Disposable {
   private showThreads(snapshot: ReviewSnapshot): void {
     let threads = snapshot.review?.threads ?? [];
     let liveIds = new Set(threads.map(t => t.id));
-    for (let [id, vscodeThread] of this.vscodeThreads) {
-      if (!liveIds.has(id)) {
-        vscodeThread.dispose();
-        this.vscodeThreads.delete(id);
-      }
+    for (let id of this.vscodeThreads.keys()) {
+      if (!liveIds.has(id))
+        this.hideThread(id);
     }
     for (let thread of threads) {
       let uri = this.getThreadUri(thread, snapshot);
       let location = snapshot.threadLocations.get(thread.id);
       if (uri !== undefined && location !== undefined)
         this.showThread(thread, uri, location);
+      else
+        this.hideThread(thread.id);
     }
   }
 
@@ -152,6 +152,12 @@ export class ReviewCommentController implements vscode.Disposable {
       timestamp: new Date(comment.createdAt),
       contextValue: comment.author.kind,
     }));
+  }
+
+  /** Disposes the VS Code thread of a review thread, if it has one. */
+  private hideThread(threadId: string): void {
+    this.vscodeThreads.get(threadId)?.dispose();
+    this.vscodeThreads.delete(threadId);
   }
 
   /** Gets the URI that a thread is shown on, or undefined if the base side can't be shown. */

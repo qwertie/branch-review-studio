@@ -5,11 +5,19 @@ import { randomBytes } from "node:crypto";
  * Claude Code sessions that wrote them. Persisted as JSON by ReviewStore.
  */
 export interface Review {
+  /** Format version of the JSON file (see reviewSchemaVersion) */
   schemaVersion: number;
+  /** Short name of the reviewed branch; ReviewStore keeps one review per branch */
   branch: string;
-  /** Ref that the review compares against, e.g. `origin/develop` */
+  /**
+   * Name of the branch that the review compares against, without `origin/`, e.g. `develop`
+   * (findMergeBase uses `origin/develop` if it exists)
+   */
   baseBranch: string;
-  /** Commit that the review compared against when it was last begun (see MergeBaseInfo) */
+  /**
+   * Merge-base commit found by the latest `review_begin` call (or when the extension created the
+   * review); the MCP tools read base-side files at this commit
+   */
   mergeBaseSha: string;
   /** ISO timestamp */
   createdAt: string;
@@ -32,12 +40,14 @@ export interface ReviewSession {
 }
 
 export type SessionRole = "review" | "followup";
+/** Severities that an agent can give a finding, most severe first. */
 export const severities = ["Critical", "Major", "Minor", "Note"] as const;
 export type Severity = typeof severities[number];
 export type ThreadStatus = "open" | "resolved";
 /** 'modified' = working-tree file; 'base' = file content at the merge-base */
 export type DiffSide = "modified" | "base";
 
+/** A conversation about a line range of one file, on one side of the diff. */
 export interface ReviewThread {
   id: string;
   /** Repo-relative path with forward slashes */
@@ -64,6 +74,7 @@ export interface Anchor {
   contextAfter: string[];
 }
 
+/** One message in a ReviewThread. */
 export interface ReviewComment {
   id: string;
   author: Author;
@@ -74,18 +85,26 @@ export interface ReviewComment {
   sessionId?: string;
 }
 
+/** Who wrote a comment. */
 export interface Author {
   kind: "agent" | "user";
+  /** Display name: the agent's name (e.g. "Claude") or the user's git user.name */
   name: string;
 }
 
+/** Version of the review JSON format that this code writes; ReviewStore refuses newer files. */
 export const reviewSchemaVersion = 1;
 
 /** Creates an empty review. */
 export function createReview(branch: string, baseBranch: string, mergeBaseSha: string): Review {
   let now = new Date().toISOString();
-  return { schemaVersion: reviewSchemaVersion, branch, baseBranch, mergeBaseSha, createdAt: now, updatedAt: now,
-    sessions: [], threads: [] };
+  return { schemaVersion: reviewSchemaVersion, branch, baseBranch: getBaseBranchName(baseBranch), mergeBaseSha,
+    createdAt: now, updatedAt: now, sessions: [], threads: [] };
+}
+
+/** Gets the form of a base branch name stored in Review.baseBranch: without a leading `origin/`. */
+export function getBaseBranchName(baseBranch: string): string {
+  return baseBranch.replace(/^origin\//, "");
 }
 
 /** Parameters of `addThread`. */

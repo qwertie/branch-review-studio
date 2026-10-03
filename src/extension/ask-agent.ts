@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as vscode from "vscode";
 import { AgentRunMode, AgentSessionMode, buildClaudeArgs, buildThreadPrompt } from "../core/agent-commands";
-import { findLatestSession, Review, ReviewSession, ReviewThread } from "../core/review";
-import { answerThreadInBackground, recordFollowupSession } from "../core/thread-answer";
+import { findLatestSession, Review, ReviewSession } from "../core/review";
+import { answerThreadInBackground, BackgroundAnswerRequest, recordFollowupSession } from "../core/thread-answer";
 import { ReviewCommentController } from "./comments";
 import { findClaude } from "./install";
 import { BranchReviewModel, getErrorMessage } from "./model";
 
+/** An item of Ask Agent's QuickPick: how Claude Code should answer. */
 interface AgentChoice extends vscode.QuickPickItem {
   sessionMode: AgentSessionMode;
   runMode: AgentRunMode;
@@ -26,30 +27,34 @@ export async function askAgent(model: BranchReviewModel, comments: ReviewComment
     void vscode.window.showErrorMessage("Type a message for the agent first.");
   } else if (claude) {
     let reviewSession = review && findSessionToFork(review, comments.getThreadId(reply.thread));
-    let choice = await vscode.window.showQuickPick(getAgentChoices(reviewSession),
-      { placeHolder: "How should Claude Code answer? (Enter = first option)" });
+    // `claude --resume` finds a session only in the folder it ran in
+    let forkableSession = reviewSession && fs.existsSync(reviewSession.cwd) ? reviewSession : undefined;
+    let question = "How should Claude Code answer? (Enter = first option)";
+    let placeHolder = reviewSession && !forkableSession
+      ? `The review session can't be forked because its folder ${reviewSession.cwd} no longer exists. ${question}`
+      : question;
+    let choice = await vscode.window.showQuickPick(getAgentChoices(forkableSession), { placeHolder });
     let threadId = choice && await comments.saveMessage(reply);
     let { review: savedReview, branch } = model.snapshot;
     let thread = savedReview?.threads.find(t => t.id === threadId);
     if (choice && thread && savedReview && branch) {
-      let cwd = choice.sessionMode === "fork" && reviewSession && fs.existsSync(reviewSession.cwd)
-        ? reviewSession.cwd : model.repoRoot;
+      let cwd = choice.sessionMode === "fork" && forkableSession ? forkableSession.cwd : model.repoRoot;
+      let location = model.snapshot.threadLocations.get(thread.id) ?? { ...thread.anchor, isOutdated: false };
+      let threadTitle = `${thread.file.split("/").pop()}:${location.startLine}`;
       let prompt = buildThreadPrompt({ review: savedReview, thread,
-        fileLines: await model.getFileLines(thread.file, thread.side),
-        location: model.snapshot.threadLocations.get(thread.id) ?? { ...thread.anchor, isOutdated: false } },
-      choice.sessionMode);
+        fileLines: await model.getFileLines(thread.file, thread.side), location }, choice.sessionMode);
       let newSessionId = randomUUID();
-      let args = buildClaudeArgs({ prompt, sessionMode: choice.sessionMode, resumeSessionId: reviewSession?.sessionId,
-        newSessionId, runMode: choice.runMode });
+      let args = buildClaudeArgs({ prompt, sessionMode: choice.sessionMode,
+        resumeSessionId: forkableSession?.sessionId, newSessionId, runMode: choice.runMode });
       log.appendLine(`Asking Claude about thread ${thread.id} (${choice.sessionMode}, ${choice.runMode}) in ${cwd}`);
       try {
         if (choice.runMode === "interactive") {
           await recordFollowupSession(model.store, branch, newSessionId, cwd);
-          let terminal = vscode.window.createTerminal({ name: `Claude: ${getThreadTitle(thread)}`, cwd,
+          let terminal = vscode.window.createTerminal({ name: `Claude: ${threadTitle}`, cwd,
             shellPath: claude.command, shellArgs: [...claude.args, ...args] });
           terminal.show();
         } else {
-          await answerInBackground(model, thread, { store: model.store, branch, threadId: thread.id, claude, args,
+          await answerInBackground(model, threadTitle, { store: model.store, branch, threadId: thread.id, claude, args,
             cwd, newSessionId, agentName: "Claude", onLine: line => log.appendLine(line.slice(0, 500)) });
         }
       } catch (e) {
@@ -87,26 +92,25 @@ function findSessionToFork(review: Review, threadId: string | undefined): Review
   return review.sessions.find(s => s.sessionId === openingSessionId) ?? findLatestSession(review, "review");
 }
 
-/** Runs answerThreadInBackground while showing progress in the status bar. */
-async function answerInBackground(model: BranchReviewModel, thread: ReviewThread,
-  request: Parameters<typeof answerThreadInBackground>[0]): Promise<void> {
+/**
+ * Runs answerThreadInBackground while showing progress in the status bar. `threadTitle` names the
+ * thread in messages, e.g. "model.ts:42".
+ */
+async function answerInBackground(model: BranchReviewModel, threadTitle: string, request: BackgroundAnswerRequest)
+  : Promise<void> {
   let statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
-  statusItem.text = `$(sync~spin) Claude: ${getThreadTitle(thread)}`;
+  statusItem.text = `$(sync~spin) Claude: ${threadTitle}`;
   statusItem.tooltip = "Claude Code is answering a Branch Review Studio thread (see the Branch Review Studio log)";
   statusItem.show();
   try {
     let answer = await answerThreadInBackground(request);
     await model.refresh();
     let message = answer.isError || answer.exitCode !== 0
-      ? `Claude Code failed to answer the thread on ${getThreadTitle(thread)} (exit code ${answer.exitCode}).`
-      : `Claude Code answered the thread on ${getThreadTitle(thread)}.`;
+      ? `Claude Code failed to answer the thread on ${threadTitle} (exit code ${answer.exitCode}).`
+      : `Claude Code answered the thread on ${threadTitle}.`;
     void vscode.window.showInformationMessage(message, "Show Thread").then(choice => choice
-      && vscode.commands.executeCommand("branchReviewStudio.openThread", thread.id));
+      && vscode.commands.executeCommand("branchReviewStudio.openThread", request.threadId));
   } finally {
     statusItem.dispose();
   }
-}
-
-function getThreadTitle(thread: ReviewThread): string {
-  return `${thread.file.split("/").pop()}:${thread.anchor.startLine}`;
 }

@@ -5,8 +5,9 @@ UI, except that the comment threads are exchanged with AI agents (Claude Code) r
 
 - The **Branch Review** view (Activity Bar) lists every file whose *working-tree* content differs
   from `git merge-base <base> HEAD`, including uncommitted and untracked files, no matter how many
-  commits the branch has. `<base>` is `origin/develop` if it exists, else `develop` (setting
-  `branchReviewStudio.baseBranch`).
+  commits the branch has. `<base>` is `origin/develop` if it exists, else `develop`. A new review
+  gets its base branch from the setting `branchReviewStudio.baseBranch` (or from `review_begin`'s
+  `baseBranch` argument) and keeps it.
 - Clicking a file opens a diff editor (merge-base vs. working file). The modified side is the real
   file, so you can edit it in place. **Open All Changes** opens all files in one multi-diff editor.
 - Review comments appear as comment threads (VS Code Comments API) in the diff editor, in normal

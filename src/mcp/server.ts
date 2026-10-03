@@ -7,12 +7,15 @@ import { mcpServerName } from "../core/agent-commands";
 import { severities } from "../core/review";
 import { ReviewTools } from "./review-tools";
 
+/** package.json's version, which esbuild.mjs substitutes at build time */
+declare const EXTENSION_VERSION: string;
+
 void main();
 
 async function main(): Promise<void> {
   let tools = new ReviewTools({ cwd: process.cwd(), sessionId: process.env.CLAUDE_CODE_SESSION_ID || undefined,
     agentName: process.env.BRS_AGENT_NAME || "Claude" });
-  let server = new McpServer({ name: mcpServerName, version: "0.2.0" });
+  let server = new McpServer({ name: mcpServerName, version: EXTENSION_VERSION });
 
   server.registerTool("review_begin", {
     description: "Starts (or resumes) the Branch Review Studio review of the git branch checked out in this "
@@ -21,7 +24,8 @@ async function main(): Promise<void> {
       + "threads are kept; the result lists open ones so that you don't post duplicates. Call this first.",
     inputSchema: {
       summary: z.string().optional().describe("Overall review summary (markdown); can also be set by review_finish"),
-      baseBranch: z.string().optional().describe("Branch to compare against; default 'develop'"),
+      baseBranch: z.string().optional()
+        .describe("Branch to compare against; default: the existing review's base, else 'develop'"),
     },
   }, args => runTool(() => tools.beginReview(args)));
 

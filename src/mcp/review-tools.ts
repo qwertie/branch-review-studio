@@ -1,10 +1,10 @@
 import * as path from "node:path";
 import { createAnchor, locateAnchor } from "../core/anchoring";
-import { readFileLines } from "../core/files";
+import { getRepoRelativePath, readFileLines } from "../core/files";
 import { findMergeBase, findRepoRoot, getCurrentBranch, getGitCommonDir } from "../core/git";
 import {
-  addComment, addThread, createReview, DiffSide, getThread, recordSession, Review, ReviewThread, Severity,
-  ThreadStatus,
+  addComment, addThread, createReview, DiffSide, getBaseBranchName, getThread, recordSession, Review, ReviewThread,
+  SessionRole, Severity, ThreadStatus,
 } from "../core/review";
 import { ReviewStore } from "../core/store";
 
@@ -62,7 +62,9 @@ export class ReviewTools {
   async addReviewComment(args: NewCommentArgs): Promise<string> {
     let target = await this.findTarget();
     let review = await target.store.readReview(target.branch) ?? await this.beginReviewCore(target, {});
-    let file = this.getRepoRelativePath(target.repoRoot, args.file);
+    let file = getRepoRelativePath(target.repoRoot, path.resolve(target.repoRoot, args.file));
+    if (file === undefined)
+      throw new Error(`'${args.file}' is not inside the repo ${target.repoRoot}.`);
     let side = args.side ?? "modified";
     let lines = await readFileLines(target.repoRoot, file, side, review.mergeBaseSha);
     if (lines === undefined)
@@ -122,14 +124,18 @@ export class ReviewTools {
 
   /**
    * Creates the branch's review, or updates its merge-base, and records the caller as the reviewing
-   * session. Existing threads are kept, so that re-running a review converges.
+   * session. Existing threads are kept, so that re-running a review converges. Without
+   * `args.baseBranch`, an existing review keeps its base (the extension's `baseBranch` setting may
+   * have chosen it); a new review compares against 'develop'.
    */
   private async beginReviewCore(target: ReviewTarget, args: { summary?: string, baseBranch?: string })
     : Promise<Review> {
-    let mergeBase = await findMergeBase(target.repoRoot, args.baseBranch || "develop");
+    let baseBranch = getBaseBranchName(
+      args.baseBranch || (await target.store.readReview(target.branch))?.baseBranch || "develop");
+    let mergeBase = await findMergeBase(target.repoRoot, baseBranch);
     let saved = await target.store.updateReview(target.branch, review => {
-      review ??= createReview(target.branch, mergeBase.baseRef, mergeBase.mergeBaseSha);
-      review.baseBranch = mergeBase.baseRef;
+      review ??= createReview(target.branch, baseBranch, mergeBase.mergeBaseSha);
+      review.baseBranch = baseBranch;
       review.mergeBaseSha = mergeBase.mergeBaseSha;
       if (args.summary)
         review.summary = args.summary;
@@ -171,17 +177,9 @@ export class ReviewTools {
   }
 
   /** Records the caller's session if new, since `claude --resume` needs its id and cwd. */
-  private recordCaller(review: Review, role: "review" | "followup"): void {
+  private recordCaller(review: Review, role: SessionRole): void {
     if (this.caller.sessionId)
       recordSession(review, this.caller.sessionId, this.caller.cwd, role);
-  }
-
-  /** Converts an absolute or relative path (either slash style) to a repo-relative '/' path. */
-  private getRepoRelativePath(repoRoot: string, file: string): string {
-    let relativePath = path.relative(repoRoot, path.resolve(repoRoot, file));
-    if (relativePath === "" || relativePath.startsWith("..") || path.isAbsolute(relativePath))
-      throw new Error(`'${file}' is not inside the repo ${repoRoot}.`);
-    return relativePath.split(path.sep).join("/");
   }
 
   /** Formats threads as a markdown list, with all comments if `includeComments`. */
@@ -200,7 +198,6 @@ export class ReviewTools {
     return entries.join("\n");
   }
 }
-
 
 /** Indents continuation lines of a comment body so that it stays inside its list item. */
 function indent(body: string): string {

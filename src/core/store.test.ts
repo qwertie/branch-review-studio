@@ -89,6 +89,14 @@ describe("ReviewStore", () => {
     expect(fs.existsSync(lockPath)).toBe(false);
   });
 
+  it("strips `origin/` from a stored base branch (as version 0.2.0 wrote it)", async () => {
+    let store = createStore();
+    await store.ensureExists();
+    let oldReview = { ...createReview("b", "develop", "abc"), baseBranch: "origin/develop" };
+    fs.writeFileSync(store.getReviewPath("b"), JSON.stringify(oldReview));
+    expect((await store.readReview("b"))?.baseBranch).toBe("develop");
+  });
+
   it("refuses to read a review written by a newer schema version", async () => {
     let store = createStore();
     await store.ensureExists();

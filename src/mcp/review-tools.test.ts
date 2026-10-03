@@ -46,6 +46,17 @@ describe("ReviewTools", () => {
     expect(rerun).toMatch(/don't post duplicates[\s\S]*src\/a\.ts:3 \[Major, open\][\s\S]*Why 2\?/);
   });
 
+  it("beginReview keeps an existing review's base branch (without `origin/`) unless another one is given", async () => {
+    let repo = createFeatureRepo();
+    let tools = createTools(repo);
+
+    await tools.beginReview({ baseBranch: "origin/main" });
+    await tools.beginReview({});
+    expect((await readReview(repo)).baseBranch).toBe("main");
+    await tools.beginReview({ baseBranch: "develop" });
+    expect((await readReview(repo)).baseBranch).toBe("develop");
+  });
+
   it("addReviewComment accepts absolute or backslashed paths and anchors the line text", async () => {
     let repo = createFeatureRepo();
     let tools = createTools(repo);

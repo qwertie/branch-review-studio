@@ -26,14 +26,15 @@ export interface ClaudeSearchOptions {
 export function findClaudeExecutable(options: ClaudeSearchOptions): ClaudeCommand | undefined {
   let isWindows = options.platform === "win32";
   if (options.configuredPath)
-    return resolveShimIfNeeded(options.configuredPath) ?? { command: options.configuredPath, args: [] };
+    return getClaudeCommand(options.configuredPath) ?? { command: options.configuredPath, args: [] };
   let pathDirs = options.pathEnv.split(isWindows ? ";" : ":").filter(dir => dir !== "");
   let names = isWindows ? ["claude.exe", "claude.cmd"] : ["claude"];
   for (let name of names) {
     for (let dir of pathDirs) {
       let candidate = path.join(dir, name);
-      if (fs.existsSync(candidate))
-        return name.endsWith(".cmd") ? resolveShimIfNeeded(candidate) : { command: candidate, args: [] };
+      let command = fs.existsSync(candidate) ? getClaudeCommand(candidate) : undefined;
+      if (command)
+        return command;
     }
   }
   let installerPath = path.join(options.homeDir, ".local", "bin", isWindows ? "claude.exe" : "claude");
@@ -106,15 +107,18 @@ export function runClaudeInBackground(claude: ClaudeCommand, args: string[], cwd
   });
 }
 
+/** Fields of one stream-json event that this extension uses (see parseStreamJsonLine). */
+export type StreamJsonFields = { sessionId?: string, resultText?: string, isError?: boolean };
+
 /** Extracts the fields this extension needs from one line of Claude Code's stream-json output. */
-export function parseStreamJsonLine(line: string): { sessionId?: string, resultText?: string, isError?: boolean } {
+export function parseStreamJsonLine(line: string): StreamJsonFields {
   let event: unknown;
   try {
     event = JSON.parse(line);
   } catch {
     return {};
   }
-  let fields: { sessionId?: string, resultText?: string, isError?: boolean } = {};
+  let fields: StreamJsonFields = {};
   if (typeof event === "object" && event !== null) {
     let record = event as Record<string, unknown>;
     let isInitOrResult = (record.type === "system" && record.subtype === "init") || record.type === "result";
@@ -138,12 +142,14 @@ function getChildEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-/** For an npm `claude.cmd` shim, gets `node <cli.js>`; returns undefined for other files. */
-function resolveShimIfNeeded(filePath: string): ClaudeCommand | undefined {
+/**
+ * Gets the command that runs an existing Claude Code executable: the file itself, or for an npm
+ * `claude.cmd` shim, `node <cli.js>`. Returns undefined for a shim whose cli.js is missing.
+ */
+function getClaudeCommand(filePath: string): ClaudeCommand | undefined {
   if (filePath.toLowerCase().endsWith(".cmd")) {
     let cliPath = path.join(path.dirname(filePath), "node_modules", "@anthropic-ai", "claude-code", "cli.js");
-    if (fs.existsSync(cliPath))
-      return { command: "node", args: [cliPath] };
+    return fs.existsSync(cliPath) ? { command: "node", args: [cliPath] } : undefined;
   }
-  return undefined;
+  return { command: filePath, args: [] };
 }

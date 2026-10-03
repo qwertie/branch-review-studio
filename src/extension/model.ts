@@ -1,12 +1,11 @@
 import * as os from "node:os";
-import * as path from "node:path";
 import * as vscode from "vscode";
 import { AnchorLocation, locateAnchor, splitLines } from "../core/anchoring";
-import { readFileLines } from "../core/files";
+import { getFullPath, getRepoRelativePath, readFileLines } from "../core/files";
 import {
   ChangedFile, findMergeBase, getChangedFiles, getConfigValue, getCurrentBranch, MergeBaseInfo,
 } from "../core/git";
-import { createReview, Review, ReviewThread } from "../core/review";
+import { createReview, DiffSide, Review } from "../core/review";
 import { ReviewStore } from "../core/store";
 
 /** Everything the UI shows about the current branch, computed by BranchReviewModel.refresh. */
@@ -45,8 +44,12 @@ export class BranchReviewModel implements vscode.Disposable {
     return this.currentSnapshot;
   }
 
-  get baseBranchSetting(): string {
-    return vscode.workspace.getConfiguration("branchReviewStudio").get<string>("baseBranch") || "develop";
+  /**
+   * Gets the branch that the current branch is compared against: the review's base branch, or for
+   * a branch without a review, the `branchReviewStudio.baseBranch` setting (default 'develop').
+   */
+  get baseBranch(): string {
+    return this.getBaseBranch(this.currentSnapshot.review);
   }
 
   /** Refreshes after a short delay, so that a burst of events causes one refresh. */
@@ -88,7 +91,7 @@ export class BranchReviewModel implements vscode.Disposable {
     if (branch === undefined)
       throw new Error("HEAD is detached, so there is no branch to associate a review with.");
     await this.store.updateReview(branch, review => {
-      review ??= createReview(branch, mergeBase?.baseRef ?? this.baseBranchSetting, mergeBase?.mergeBaseSha ?? "");
+      review ??= createReview(branch, this.baseBranch, mergeBase?.mergeBaseSha ?? "");
       mutate(review);
       return review;
     });
@@ -103,21 +106,19 @@ export class BranchReviewModel implements vscode.Disposable {
 
   /** Gets the absolute path of a repo-relative file path. */
   getFullPath(file: string): string {
-    return path.join(this.repoRoot, ...file.split("/"));
+    return getFullPath(this.repoRoot, file);
   }
 
   /** Gets the repo-relative path (forward slashes) of a file; undefined if outside the repo. */
   getRelativePath(fsPath: string): string | undefined {
-    let relativePath = path.relative(this.repoRoot, fsPath);
-    let isInside = relativePath !== "" && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
-    return isInside ? relativePath.split(path.sep).join("/") : undefined;
+    return getRepoRelativePath(this.repoRoot, fsPath);
   }
 
   /**
    * Gets the lines of a file on one side of the diff (base side: at `mergeBaseSha`), or
    * undefined if the file doesn't exist there. The modified side includes unsaved changes.
    */
-  async getFileLines(file: string, side: ReviewThread["side"],
+  async getFileLines(file: string, side: DiffSide,
     mergeBaseSha = this.currentSnapshot.mergeBase?.mergeBaseSha): Promise<string[] | undefined> {
     let openDocument = side === "modified" ? vscode.workspace.textDocuments.find(d => d.uri.scheme === "file"
       && this.getRelativePath(d.uri.fsPath) === file) : undefined;
@@ -134,17 +135,15 @@ export class BranchReviewModel implements vscode.Disposable {
 
   private async computeSnapshot(): Promise<ReviewSnapshot> {
     let branch = await getCurrentBranch(this.repoRoot);
+    let review = branch === undefined ? undefined : await this.store.readReview(branch);
     let mergeBase: MergeBaseInfo | undefined;
     let mergeBaseError: string | undefined;
     try {
-      mergeBase = await findMergeBase(this.repoRoot, this.baseBranchSetting);
+      mergeBase = await findMergeBase(this.repoRoot, this.getBaseBranch(review));
     } catch (e) {
       mergeBaseError = getErrorMessage(e);
     }
-    let [changedFiles, review] = await Promise.all([
-      mergeBase ? getChangedFiles(this.repoRoot, mergeBase.mergeBaseSha) : Promise.resolve([]),
-      branch === undefined ? Promise.resolve(undefined) : this.store.readReview(branch),
-    ]);
+    let changedFiles = mergeBase ? await getChangedFiles(this.repoRoot, mergeBase.mergeBaseSha) : [];
     let threadLocations = new Map<string, AnchorLocation>();
     let linesByFile = new Map<string, Promise<string[] | undefined>>();
     for (let thread of review?.threads ?? []) {
@@ -154,6 +153,11 @@ export class BranchReviewModel implements vscode.Disposable {
       threadLocations.set(thread.id, locateAnchor((await linesByFile.get(key)) ?? [], thread.anchor));
     }
     return { branch, mergeBase, mergeBaseError, changedFiles, review, threadLocations };
+  }
+
+  private getBaseBranch(review: Review | undefined): string {
+    return review?.baseBranch || vscode.workspace.getConfiguration("branchReviewStudio").get<string>("baseBranch")
+      || "develop";
   }
 }
 

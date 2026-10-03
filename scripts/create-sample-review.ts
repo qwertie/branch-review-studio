@@ -1,13 +1,12 @@
 // Creates a sample review for the current branch of a repo, so that the extension's tree view and
-// comment threads can be tried before the MCP server exists. Usage (from this repo's root):
+// comment threads can be tried without asking an agent for a review. Usage (from this repo's root):
 //   npm run sample-review -- <path-to-repo> [--force]
 // It writes only to <git-common-dir>/branch-review-studio/reviews/<branch>.json.
-import * as fs from "node:fs";
 import * as path from "node:path";
-import { createAnchor, splitLines } from "../src/core/anchoring";
+import { createAnchor } from "../src/core/anchoring";
+import { readFileLines } from "../src/core/files";
 import {
-  ChangedFile, findMergeBase, findRepoRoot, getChangedFiles, getCurrentBranch, getFileAtRevision, getGitCommonDir,
-  runGit,
+  ChangedFile, findMergeBase, findRepoRoot, getChangedFiles, getCurrentBranch, getGitCommonDir, runGit,
 } from "../src/core/git";
 import { addComment, addThread, createReview, DiffSide, Review, Severity } from "../src/core/review";
 import { ReviewStore } from "../src/core/store";
@@ -26,7 +25,8 @@ async function main(): Promise<void> {
   let branch = repoRoot && await getCurrentBranch(repoRoot);
   if (repoRoot === undefined || branch === undefined)
     throw new Error(`${repoArg} is not in a git repo with a branch checked out.`);
-  let mergeBase = await findMergeBase(repoRoot, "develop");
+  let baseBranch = "develop";
+  let mergeBase = await findMergeBase(repoRoot, baseBranch);
   // Prefer source files, where sticky scroll has class/method lines to show
   let isSourceFile = (f: ChangedFile) => /\.(cs|tsx?|dart)$/.test(f.path);
   let changedFiles = (await getChangedFiles(repoRoot, mergeBase.mergeBaseSha)).filter(f => f.status !== "Deleted")
@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   if (!force && await store.readReview(branch))
     throw new Error(`Branch '${branch}' already has a review. Use --force to replace it.`);
 
-  let review = createReview(branch, mergeBase.baseRef, mergeBase.mergeBaseSha);
+  let review = createReview(branch, baseBranch, mergeBase.mergeBaseSha);
   review.summary = "**Sample review** created by scripts/create-sample-review.ts. "
     + `It has threads on ${Math.min(changedFiles.length, 3)} changed files.`;
   let samples: [Severity, string][] = [
@@ -60,11 +60,10 @@ async function main(): Promise<void> {
 
 async function addSampleThread(review: Review, repoRoot: string, mergeBaseSha: string, file: ChangedFile,
   side: DiffSide, severity: Severity, body: string) {
-  let text = side === "modified"
-    ? fs.readFileSync(path.join(repoRoot, file.path), "utf8")
-    : await getFileAtRevision(repoRoot, mergeBaseSha, file.oldPath ?? file.path) ?? "";
+  let lines = await readFileLines(repoRoot, side === "base" ? file.oldPath ?? file.path : file.path, side,
+    mergeBaseSha);
   let line = await findFirstChangedLine(repoRoot, mergeBaseSha, file, side);
-  let anchor = createAnchor(splitLines(text), line, line);
+  let anchor = createAnchor(lines ?? [], line, line);
   return addThread(review, { file: file.path, side, anchor, severity, author: claude, body });
 }
 

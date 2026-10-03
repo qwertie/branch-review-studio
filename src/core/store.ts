@@ -1,11 +1,12 @@
 import { randomBytes } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { Review, reviewSchemaVersion } from "./review";
+import { getErrorCode, readFileIfExists } from "./files";
+import { getBaseBranchName, Review, reviewSchemaVersion } from "./review";
 
 /** Explains, inside every file that ReviewStore writes, where the file came from. */
-export const provenanceNote = "Created by the Branch Review Studio VS Code extension / MCP server "
-  + "(repo D:\\branch-review-studio). Safe to delete. Git ignores it because it is inside the .git folder.";
+const provenanceNote = "Created by Branch Review Studio (VS Code extension barreleye.branch-review-studio "
+  + "and its MCP server). Safe to delete. Git ignores it because it is inside the .git folder.";
 
 /** If a lock file is older than this, its owner presumably crashed, so the lock is broken. */
 const staleLockMs = 10_000;
@@ -15,13 +16,14 @@ const lockTimeoutMs = 30_000;
 /**
  * Reads and writes the reviews of one repo. Reviews live in
  * `<git-common-dir>/branch-review-studio/`, which all worktrees of the repo share, one JSON file
- * per branch. Both the VS Code extension and
- * the MCP server process modify these files, so every modification goes through `updateReview`,
- * which holds an exclusive lock file while it reads, mutates and atomically replaces the file.
+ * per branch. Both the VS Code extension and the MCP server process modify these files, so every
+ * modification goes through `updateReview`, which holds an exclusive lock file while it reads,
+ * mutates and atomically replaces the file.
  */
 export class ReviewStore {
   /** Folder containing README.txt and reviews/ */
   readonly dir: string;
+  /** Folder containing one `<encoded branch>.json` file per branch */
   readonly reviewsDir: string;
 
   constructor(gitCommonDir: string) {
@@ -29,6 +31,7 @@ export class ReviewStore {
     this.reviewsDir = path.join(this.dir, "reviews");
   }
 
+  /** Gets the path of the JSON file that holds (or would hold) the review of `branch`. */
   getReviewPath(branch: string): string {
     return path.join(this.reviewsDir, encodeBranchForFileName(branch) + ".json");
   }
@@ -91,7 +94,8 @@ function parseReview(text: string): Review {
   if (review.schemaVersion > reviewSchemaVersion)
     throw new Error(`This review was written by a newer version of Branch Review Studio `
       + `(schemaVersion ${review.schemaVersion}). Please update the extension.`);
-  return review;
+  // Files written by version 0.2.0 may store a ref such as `origin/develop`
+  return { ...review, baseBranch: getBaseBranchName(review.baseBranch) };
 }
 
 /** Runs `action` while holding an exclusive lock file, breaking the lock if it is stale. */
@@ -144,16 +148,6 @@ async function writeFileAtomically(filePath: string, text: string): Promise<void
   }
 }
 
-async function readFileIfExists(filePath: string): Promise<string | undefined> {
-  try {
-    return await fs.readFile(filePath, "utf8");
-  } catch (e) {
-    if (getErrorCode(e) === "ENOENT")
-      return undefined;
-    throw e;
-  }
-}
-
 /**
  * Runs `action`, retrying for up to ~2 seconds if it fails with EPERM/EBUSY/EACCES. On Windows,
  * renaming over a file (or reading it) can fail briefly while another process has it open.
@@ -169,10 +163,6 @@ async function retryIfBusy<T>(action: () => Promise<T>): Promise<T> {
       await delay(100);
     }
   }
-}
-
-function getErrorCode(e: unknown): string | undefined {
-  return e instanceof Error && "code" in e && typeof e.code === "string" ? e.code : undefined;
 }
 
 function delay(ms: number): Promise<void> {

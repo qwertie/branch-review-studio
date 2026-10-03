@@ -1,5 +1,8 @@
 // Bundles the VS Code extension and the stdio MCP server into dist/.
+import * as fs from "node:fs";
 import * as esbuild from "esbuild";
+
+const { version } = JSON.parse(fs.readFileSync(new URL("package.json", import.meta.url), "utf8"));
 
 const isProduction = process.argv.includes("--production");
 const isWatch = process.argv.includes("--watch");
@@ -12,6 +15,7 @@ const context = await esbuild.context({
   format: "cjs",
   outdir: "dist",
   external: ["vscode"],
+  define: { EXTENSION_VERSION: JSON.stringify(version) },
   sourcemap: !isProduction,
   minify: isProduction,
   logLevel: "info",

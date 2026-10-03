@@ -1,5 +1,5 @@
-import * as path from "node:path";
 import * as vscode from "vscode";
+import { getFullPath } from "../core/files";
 import { getFileAtRevision } from "../core/git";
 
 /** URI scheme of read-only documents that show a file's content at the merge-base. */
@@ -13,7 +13,7 @@ export const baseScheme = "brs-base";
  */
 export function getBaseUri(repoRoot: string, sha: string, file: string): vscode.Uri {
   let query = new URLSearchParams({ sha, root: repoRoot, file }).toString();
-  return vscode.Uri.file(path.join(repoRoot, file)).with({ scheme: baseScheme, query });
+  return vscode.Uri.file(getFullPath(repoRoot, file)).with({ scheme: baseScheme, query });
 }
 
 /** Parses a URI made by getBaseUri. */

@@ -16,6 +16,10 @@ describe("review model", () => {
     expect(getAuthorLabel(thread, reply)).toBe("Claude");
   });
 
+  it("createReview stores the base branch without `origin/`", () => {
+    expect(createReview("b", "origin/develop", "abc").baseBranch).toBe("develop");
+  });
+
   it("getThread throws an error naming the missing id", () => {
     expect(() => getThread(createReview("b", "develop", "abc"), "deadbeef")).toThrow(/deadbeef/);
   });

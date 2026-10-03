@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { ChangedFile } from "../core/git";
+import { ChangedFile, comparePaths } from "../core/git";
 import { ReviewThread } from "../core/review";
 import { BranchReviewModel, ReviewSnapshot } from "./model";
 
@@ -124,6 +124,5 @@ function getFileNodes(snapshot: ReviewSnapshot): ReviewTreeNode[] {
     if (!snapshot.changedFiles.some(f => f.path === file))
       files.push({ path: file, status: undefined });
   }
-  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return files.map(file => ({ kind: "file", file, threads: threadsByFile.get(file.path) ?? [] }));
+  return files.sort(comparePaths).map(file => ({ kind: "file", file, threads: threadsByFile.get(file.path) ?? [] }));
 }

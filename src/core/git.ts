@@ -13,20 +13,24 @@ export interface ChangedFile {
   oldPath?: string;
 }
 
+/** The commit that a branch's changes are compared against, and how it was found. */
 export interface MergeBaseInfo {
   /** The ref that was compared against, e.g. `origin/develop` or `develop` */
   baseRef: string;
   mergeBaseSha: string;
 }
 
+/** A working tree of the repo, from `git worktree list`. */
 export interface WorktreeInfo {
   /** Absolute path in native format */
   path: string;
+  /** SHA of the commit checked out in the worktree */
   head: string;
   /** Short branch name, or undefined if the worktree has a detached HEAD */
   branch: string | undefined;
 }
 
+/** A branch that Switch Branch can open. */
 export interface BranchInfo {
   /** Short branch name without the remote prefix, e.g. `feature/x` */
   name: string;
@@ -63,41 +67,24 @@ export async function getChangedFiles(repoRoot: string, mergeBase: string): Prom
   let files = parseNameStatus(diffOutput);
   for (let untrackedPath of splitNul(untrackedOutput))
     files.push({ path: untrackedPath, status: "Added" });
-  return files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return files.sort(comparePaths);
 }
 
 /** Gets the text of a file at a revision, or undefined if the file does not exist there. */
-export async function getFileAtRevision(repoRoot: string, revision: string, filePath: string)
+export function getFileAtRevision(repoRoot: string, revision: string, filePath: string)
   : Promise<string | undefined> {
-  try {
-    return await runGit(repoRoot, ["show", `${revision}:${filePath}`]);
-  } catch (e) {
-    if (e instanceof GitError)
-      return undefined;
-    throw e;
-  }
+  return tryRunGit(repoRoot, ["show", `${revision}:${filePath}`]);
 }
 
 /** Gets the top folder of the working tree containing `folder`; undefined if not in a repo. */
 export async function findRepoRoot(folder: string): Promise<string | undefined> {
-  try {
-    return path.resolve((await runGit(folder, ["rev-parse", "--show-toplevel"])).trim());
-  } catch (e) {
-    if (e instanceof GitError)
-      return undefined;
-    throw e;
-  }
+  let output = await tryRunGit(folder, ["rev-parse", "--show-toplevel"]);
+  return output === undefined ? undefined : path.resolve(output.trim());
 }
 
 /** Gets the checked-out branch's short name, or undefined on a detached HEAD. */
 export async function getCurrentBranch(repoRoot: string): Promise<string | undefined> {
-  try {
-    return (await runGit(repoRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
-  } catch (e) {
-    if (e instanceof GitError)
-      return undefined;
-    throw e;
-  }
+  return (await tryRunGit(repoRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"]))?.trim();
 }
 
 /** Gets the absolute `.git` folder shared by all worktrees of the repo. */
@@ -150,13 +137,12 @@ export async function fetchBranch(repoRoot: string, remote: string, branch: stri
 
 /** Gets a git config value such as `user.name`, or undefined if unset. */
 export async function getConfigValue(repoRoot: string, key: string): Promise<string | undefined> {
-  try {
-    return (await runGit(repoRoot, ["config", "--get", key])).trim();
-  } catch (e) {
-    if (e instanceof GitError)
-      return undefined;
-    throw e;
-  }
+  return (await tryRunGit(repoRoot, ["config", "--get", key]))?.trim();
+}
+
+/** Orders items by `path` (ordinal string comparison), for use with `Array.sort`. */
+export function comparePaths(a: { path: string }, b: { path: string }): number {
+  return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
 }
 
 /** Parses `git worktree list --porcelain` output, skipping bare entries. */
@@ -217,6 +203,17 @@ export function runGit(cwd: string, args: string[]): Promise<string> {
   });
 }
 
+/** Runs git like `runGit`, but returns undefined instead of throwing GitError. */
+async function tryRunGit(cwd: string, args: string[]): Promise<string | undefined> {
+  try {
+    return await runGit(cwd, args);
+  } catch (e) {
+    if (e instanceof GitError)
+      return undefined;
+    throw e;
+  }
+}
+
 /** Finds `origin/<baseBranch>`, else `<baseBranch>` as a local branch or any other revision. */
 async function findBaseRef(repoRoot: string, baseBranch: string): Promise<string | undefined> {
   for (let [candidate, fullRef] of [
@@ -224,13 +221,8 @@ async function findBaseRef(repoRoot: string, baseBranch: string): Promise<string
     [baseBranch, `refs/heads/${baseBranch}`],
     [baseBranch, baseBranch],
   ]) {
-    try {
-      await runGit(repoRoot, ["rev-parse", "--verify", "--quiet", `${fullRef}^{commit}`]);
+    if (await tryRunGit(repoRoot, ["rev-parse", "--verify", "--quiet", `${fullRef}^{commit}`]) !== undefined)
       return candidate;
-    } catch (e) {
-      if (!(e instanceof GitError))
-        throw e;
-    }
   }
   return undefined;
 }

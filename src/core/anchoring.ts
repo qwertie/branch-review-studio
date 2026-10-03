@@ -8,6 +8,7 @@ export interface AnchorLocation {
   isOutdated: boolean;
 }
 
+/** Maximum number of lines in `Anchor.contextBefore` and `Anchor.contextAfter` */
 const contextSize = 3;
 
 /** Splits file text into lines, accepting both LF and CRLF line endings. */
@@ -40,7 +41,7 @@ export function createAnchor(lines: string[], startLine: number, endLine: number
  * kept (clamped to the file) and marked outdated.
  */
 export function locateAnchor(lines: string[], anchor: Anchor): AnchorLocation {
-  let lineCount = anchor.endLine - anchor.startLine;
+  let lastLineOffset = anchor.endLine - anchor.startLine;
   let target = anchor.lineText.trim();
   let candidates: number[] = [];
   for (let i = 0; i < lines.length; i++) {
@@ -55,7 +56,7 @@ export function locateAnchor(lines: string[], anchor: Anchor): AnchorLocation {
     let bestScore = -1;
     let bestDistance = Infinity;
     for (let candidate of candidates) {
-      let score = countMatchingContextLines(lines, anchor, candidate, lineCount);
+      let score = countMatchingContextLines(lines, anchor, candidate, lastLineOffset);
       let distance = Math.abs(candidate - anchor.startLine);
       if (score > bestScore || (score === bestScore && distance < bestDistance)) {
         best = candidate;
@@ -66,13 +67,15 @@ export function locateAnchor(lines: string[], anchor: Anchor): AnchorLocation {
   }
 
   if (best !== undefined)
-    return { startLine: best, endLine: best + lineCount, isOutdated: false };
-  let startLine = clamp(anchor.startLine, 1, Math.max(lines.length, 1));
-  return { startLine, endLine: clamp(startLine + lineCount, startLine, Math.max(lines.length, 1)), isOutdated: true };
+    return { startLine: best, endLine: best + lastLineOffset, isOutdated: false };
+  let lastLine = Math.max(lines.length, 1);
+  let startLine = clamp(anchor.startLine, 1, lastLine);
+  return { startLine, endLine: clamp(startLine + lastLineOffset, startLine, lastLine), isOutdated: true };
 }
 
 /** Counts how many of the anchor's context lines match the lines around a candidate start line. */
-function countMatchingContextLines(lines: string[], anchor: Anchor, startLine: number, lineCount: number): number {
+function countMatchingContextLines(lines: string[], anchor: Anchor, startLine: number, lastLineOffset: number)
+  : number {
   let count = 0;
   anchor.contextBefore.forEach((text, i) => {
     let lineIndex = startLine - 1 - anchor.contextBefore.length + i;
@@ -80,7 +83,7 @@ function countMatchingContextLines(lines: string[], anchor: Anchor, startLine: n
       count++;
   });
   anchor.contextAfter.forEach((text, i) => {
-    let lineIndex = startLine + lineCount + i;
+    let lineIndex = startLine + lastLineOffset + i;
     if (lines[lineIndex]?.trim() === text.trim())
       count++;
   });
