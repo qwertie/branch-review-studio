@@ -1,10 +1,13 @@
+import * as path from "node:path";
 import * as vscode from "vscode";
 import { findRepoRoot, getGitCommonDir, getGitDir } from "../core/git";
 import { ReviewStore } from "../core/store";
+import { askAgent } from "./ask-agent";
 import { BaseContentProvider, baseScheme } from "./base-content";
 import { ReviewCommentController } from "./comments";
 import { fetchBase, openAllChanges, openFileDiff, openThread } from "./diff-commands";
-import { BranchReviewModel } from "./model";
+import { installMcpServer, installSkill, uninstall, updateInstalledServerIfOutdated } from "./install";
+import { BranchReviewModel, getErrorMessage } from "./model";
 import { ReviewTreeNode, ReviewTreeProvider } from "./review-tree";
 import { switchBranch } from "./switch-branch";
 
@@ -20,16 +23,18 @@ export interface BranchReviewStudioExports {
 export async function activate(context: vscode.ExtensionContext): Promise<BranchReviewStudioExports> {
   let log = vscode.window.createOutputChannel("Branch Review Studio");
   context.subscriptions.push(log);
+  registerInstallCommands(context, log);
+  void updateInstalledServerIfOutdated(context, log).catch(e => log.appendLine(getErrorMessage(e)));
   let model = await createModel(log);
   if (model === undefined) {
-    registerCommands(context, undefined);
+    registerCommands(context, undefined, log);
   } else {
     let comments = new ReviewCommentController(model);
     let tree = new ReviewTreeProvider(model);
     context.subscriptions.push(model, comments, tree,
       vscode.window.registerTreeDataProvider("branchReviewStudio.files", tree),
       vscode.workspace.registerTextDocumentContentProvider(baseScheme, new BaseContentProvider()));
-    registerCommands(context, model, comments);
+    registerCommands(context, model, log, comments);
     await watchForChanges(context, model);
     await model.refresh();
   }
@@ -43,7 +48,6 @@ async function createModel(log: vscode.OutputChannel): Promise<BranchReviewModel
     let repoRoot = folder.uri.scheme === "file" ? await findRepoRoot(folder.uri.fsPath) : undefined;
     if (repoRoot !== undefined) {
       let store = new ReviewStore(await getGitCommonDir(repoRoot));
-      await store.ensureExists();
       log.appendLine(`Repo: ${repoRoot}; review store: ${store.dir}`);
       return new BranchReviewModel(repoRoot, store, log);
     }
@@ -51,8 +55,17 @@ async function createModel(log: vscode.OutputChannel): Promise<BranchReviewModel
   return undefined;
 }
 
+/** Registers commands that work without a git repo. */
+function registerInstallCommands(context: vscode.ExtensionContext, log: vscode.OutputChannel): void {
+  context.subscriptions.push(
+    vscode.commands.registerCommand("branchReviewStudio.installMcpServer", () => installMcpServer(context, log)),
+    vscode.commands.registerCommand("branchReviewStudio.installSkill", () => installSkill(context)),
+    vscode.commands.registerCommand("branchReviewStudio.uninstall", () => uninstall(log)));
+}
+
+/** Registers commands that need a git repo; without one (`model` undefined), they show an error. */
 function registerCommands(context: vscode.ExtensionContext, model: BranchReviewModel | undefined,
-  comments?: ReviewCommentController): void {
+  log: vscode.OutputChannel, comments?: ReviewCommentController): void {
   let commands: Record<string, (model: BranchReviewModel, ...args: never[]) => unknown> = {
     refresh: m => m.refresh(),
     openAllChanges,
@@ -70,6 +83,7 @@ function registerCommands(context: vscode.ExtensionContext, model: BranchReviewM
     resolveThread: (_, thread: vscode.CommentThread) => comments?.setThreadStatus(thread, "resolved"),
     unresolveThread: (_, thread: vscode.CommentThread) => comments?.setThreadStatus(thread, "open"),
     deleteThread: (_, thread: vscode.CommentThread) => comments?.deleteThread(thread),
+    askAgent: (m, reply: vscode.CommentReply) => comments && askAgent(m, comments, reply, log),
   };
   for (let [name, handler] of Object.entries(commands)) {
     context.subscriptions.push(vscode.commands.registerCommand(`branchReviewStudio.${name}`, (...args: never[]) =>
@@ -82,13 +96,19 @@ function registerCommands(context: vscode.ExtensionContext, model: BranchReviewM
 /** Refreshes the model on file saves, review store or HEAD changes, and window focus. */
 async function watchForChanges(context: vscode.ExtensionContext, model: BranchReviewModel): Promise<void> {
   let schedule = () => model.scheduleRefresh();
-  let storeWatcher = vscode.workspace.createFileSystemWatcher(
-    new vscode.RelativePattern(vscode.Uri.file(model.store.reviewsDir), "*.json"));
-  let headWatcher = vscode.workspace.createFileSystemWatcher(
-    new vscode.RelativePattern(vscode.Uri.file(await getGitDir(model.repoRoot)), "{HEAD,logs/HEAD}"));
-  context.subscriptions.push(storeWatcher, headWatcher,
-    storeWatcher.onDidChange(schedule), storeWatcher.onDidCreate(schedule), storeWatcher.onDidDelete(schedule),
-    headWatcher.onDidChange(schedule), headWatcher.onDidCreate(schedule),
+  let gitDir = await getGitDir(model.repoRoot);
+  // ReviewStore creates its folder when it first saves a review, so the review watcher is
+  // (re)created when the folder appears.
+  let reviewWatcher = watchFolder(model.store.reviewsDir, "*.json", schedule);
+  let watchReviews = () => {
+    reviewWatcher.dispose();
+    reviewWatcher = watchFolder(model.store.reviewsDir, "*.json", schedule);
+    schedule();
+  };
+  context.subscriptions.push({ dispose: () => reviewWatcher.dispose() },
+    watchFolder(path.dirname(model.store.dir), path.basename(model.store.dir), watchReviews),
+    watchFolder(gitDir, "HEAD", schedule),
+    watchFolder(path.join(gitDir, "logs"), "HEAD", schedule),
     vscode.workspace.onDidSaveTextDocument(schedule),
     vscode.workspace.onDidCreateFiles(schedule), vscode.workspace.onDidDeleteFiles(schedule),
     vscode.workspace.onDidRenameFiles(schedule),
@@ -100,6 +120,13 @@ async function watchForChanges(context: vscode.ExtensionContext, model: BranchRe
       if (e.affectsConfiguration("branchReviewStudio.baseBranch"))
         schedule();
     }));
+}
+
+/** Calls `onEvent` when files matching `glob` directly in `folder` are created/changed/deleted. */
+function watchFolder(folder: string, glob: string, onEvent: () => void): vscode.Disposable {
+  let watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(folder), glob));
+  let subscriptions = [watcher.onDidCreate(onEvent), watcher.onDidChange(onEvent), watcher.onDidDelete(onEvent)];
+  return vscode.Disposable.from(watcher, ...subscriptions);
 }
 
 function getActiveEditorFile(model: BranchReviewModel): string | undefined {

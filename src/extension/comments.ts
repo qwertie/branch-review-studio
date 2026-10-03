@@ -4,7 +4,7 @@ import { addComment, addThread, DiffSide, getAuthorLabel, getThread, ReviewThrea
 import { baseScheme, getBaseUri, parseBaseUri } from "./base-content";
 import { BranchReviewModel, getErrorMessage, ReviewSnapshot } from "./model";
 
-/** Id of the CommentController; package.json menus test `commentController == branch-review-studio`. */
+/** Id of the CommentController, which package.json menus test (`commentController == ...`). */
 const controllerId = "branch-review-studio";
 
 /**
@@ -30,29 +30,47 @@ export class ReviewCommentController implements vscode.Disposable {
     this.subscriptions.push(model.onDidChange(snapshot => this.showThreads(snapshot)));
   }
 
-  /** Saves the text of a new VS Code thread's first comment as a new review thread. */
-  async createThread(reply: vscode.CommentReply): Promise<void> {
+  /**
+   * Saves the user's message as a reply in an existing thread or as the first comment of a new
+   * thread, and returns the thread's id (undefined if saving failed).
+   */
+  async saveMessage(reply: vscode.CommentReply): Promise<string | undefined> {
+    return this.threadIds.has(reply.thread) ? await this.reply(reply) : await this.createThread(reply);
+  }
+
+  /** Saves a new VS Code thread's first comment as a new review thread; returns its id. */
+  async createThread(reply: vscode.CommentReply): Promise<string | undefined> {
     let target = this.getCommentTarget(reply.thread.uri);
     if (target) {
       let lines = await this.model.getFileLines(target.file, target.side) ?? [];
       let range = reply.thread.range;
       let anchor = createAnchor(lines, (range?.start.line ?? 0) + 1, (range?.end.line ?? 0) + 1);
       let author = { kind: "user" as const, name: await this.model.getUserName() };
-      await this.saveOrShowError(() => this.model.modifyReview(review => {
-        addThread(review, { file: target.file, side: target.side, anchor, author, body: reply.text });
+      let threadId: string | undefined;
+      let isSaved = await this.saveOrShowError(() => this.model.modifyReview(review => {
+        threadId = addThread(review, { file: target.file, side: target.side, anchor, author, body: reply.text }).id;
       }), reply.thread);
+      return isSaved ? threadId : undefined;
     }
+    return undefined;
   }
 
-  /** Saves a reply in an existing thread. */
-  async reply(reply: vscode.CommentReply): Promise<void> {
+  /** Gets the review thread id of a VS Code thread; undefined if it isn't saved yet. */
+  getThreadId(vscodeThread: vscode.CommentThread): string | undefined {
+    return this.threadIds.get(vscodeThread);
+  }
+
+  /** Saves a reply in an existing thread; returns the thread's id. */
+  async reply(reply: vscode.CommentReply): Promise<string | undefined> {
     let threadId = this.threadIds.get(reply.thread);
     if (threadId !== undefined) {
       let author = { kind: "user" as const, name: await this.model.getUserName() };
-      await this.saveOrShowError(() => this.model.modifyReview(review => {
+      let isSaved = await this.saveOrShowError(() => this.model.modifyReview(review => {
         addComment(review, getThread(review, threadId), author, reply.text);
       }));
+      return isSaved ? threadId : undefined;
     }
+    return undefined;
   }
 
   /** Sets a thread's status to resolved or open. */
@@ -165,14 +183,17 @@ export class ReviewCommentController implements vscode.Disposable {
 
   /**
    * Runs a save action, showing an error message if it fails. On success, disposes `draftThread`
-   * (a thread the user started), since showThreads then shows the saved thread.
+   * (a thread the user started), since showThreads then shows the saved thread. Returns whether
+   * the save succeeded.
    */
-  private async saveOrShowError(save: () => Promise<void>, draftThread?: vscode.CommentThread): Promise<void> {
+  private async saveOrShowError(save: () => Promise<void>, draftThread?: vscode.CommentThread): Promise<boolean> {
     try {
       await save();
       draftThread?.dispose();
+      return true;
     } catch (e) {
       void vscode.window.showErrorMessage(`Branch Review Studio could not save the comment: ${getErrorMessage(e)}`);
+      return false;
     }
   }
 }

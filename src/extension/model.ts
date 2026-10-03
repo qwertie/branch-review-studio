@@ -1,10 +1,10 @@
-import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { AnchorLocation, locateAnchor, splitLines } from "../core/anchoring";
+import { readFileLines } from "../core/files";
 import {
-  ChangedFile, findMergeBase, getChangedFiles, getConfigValue, getCurrentBranch, getFileAtRevision, MergeBaseInfo,
+  ChangedFile, findMergeBase, getChangedFiles, getConfigValue, getCurrentBranch, MergeBaseInfo,
 } from "../core/git";
 import { createReview, Review, ReviewThread } from "../core/review";
 import { ReviewStore } from "../core/store";
@@ -119,15 +119,12 @@ export class BranchReviewModel implements vscode.Disposable {
    */
   async getFileLines(file: string, side: ReviewThread["side"],
     mergeBaseSha = this.currentSnapshot.mergeBase?.mergeBaseSha): Promise<string[] | undefined> {
-    let text: string | undefined;
-    if (side === "modified") {
-      let openDocument = vscode.workspace.textDocuments.find(d => d.uri.scheme === "file"
-        && this.getRelativePath(d.uri.fsPath) === file);
-      text = openDocument?.getText() ?? await readFileIfExists(this.getFullPath(file));
-    } else if (mergeBaseSha) {
-      text = await getFileAtRevision(this.repoRoot, mergeBaseSha, file);
-    }
-    return text === undefined ? undefined : splitLines(text);
+    let openDocument = side === "modified" ? vscode.workspace.textDocuments.find(d => d.uri.scheme === "file"
+      && this.getRelativePath(d.uri.fsPath) === file) : undefined;
+    if (openDocument)
+      return splitLines(openDocument.getText());
+    return mergeBaseSha === undefined && side === "base"
+      ? undefined : await readFileLines(this.repoRoot, file, side, mergeBaseSha ?? "");
   }
 
   dispose(): void {
@@ -164,10 +161,3 @@ export function getErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-async function readFileIfExists(filePath: string): Promise<string | undefined> {
-  try {
-    return await fs.readFile(filePath, "utf8");
-  } catch {
-    return undefined;
-  }
-}

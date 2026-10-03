@@ -67,28 +67,33 @@ export interface ClaudeInvocation {
   sessionMode: AgentSessionMode;
   /** Session to fork; required when `sessionMode` is 'fork' */
   resumeSessionId?: string;
+  /** Id (a UUID) for the new session, so that it can be recorded before the session starts */
+  newSessionId?: string;
   runMode: AgentRunMode;
 }
 
 /**
  * Builds the argument list for the `claude` executable (an argv array, never a shell string, so
- * multi-line prompts need no quoting). Background runs may call this extension's MCP tools
- * without asking, since there is nobody to answer a permission prompt.
+ * multi-line prompts need no quoting). Claude may call this extension's MCP tools without asking,
+ * since they only write to the review.
  */
 export function buildClaudeArgs(invocation: ClaudeInvocation): string[] {
-  let args: string[] = [];
+  // --allowedTools takes a variable number of values, so an option, not the prompt, must follow it
+  let args = ["--allowedTools", `mcp__${mcpServerName}`];
+  if (invocation.runMode === "background")
+    args.push("-p", "--output-format", "stream-json", "--verbose");
   if (invocation.sessionMode === "fork") {
     if (!invocation.resumeSessionId)
       throw new Error("Cannot fork the review session because the review has no recorded session id.");
     args.push("--resume", invocation.resumeSessionId, "--fork-session");
   }
-  if (invocation.runMode === "background")
-    args.push("-p", "--output-format", "stream-json", "--verbose", "--allowedTools", `mcp__${mcpServerName}`);
+  if (invocation.newSessionId)
+    args.push("--session-id", invocation.newSessionId);
   args.push(invocation.prompt);
   return args;
 }
 
-/** Formats the thread's lines and surrounding lines with line numbers, marking the former with '>'. */
+/** Formats the thread's lines and nearby lines with line numbers, marking the former with '>'. */
 function formatExcerpt(lines: string[], location: AnchorLocation): string {
   let first = Math.max(1, location.startLine - excerptContextLines);
   let last = Math.min(lines.length, location.endLine + excerptContextLines);

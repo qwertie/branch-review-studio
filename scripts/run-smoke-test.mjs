@@ -24,5 +24,9 @@ let result = spawnSync(codeExe, [
   "--skip-welcome", "--skip-release-notes",
   repo,
 ], { stdio: "inherit", env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } });
-fs.rmSync(profileDir, { recursive: true, force: true, maxRetries: 3 });
+try {
+  fs.rmSync(profileDir, { recursive: true, force: true, maxRetries: 3 });
+} catch (e) {
+  console.log(`Could not delete ${profileDir}: ${e.message}`);
+}
 process.exit(result.status ?? 1);

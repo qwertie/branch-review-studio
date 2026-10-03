@@ -13,7 +13,7 @@ afterEach(() => {
     cleanup();
 });
 
-/** Creates a repo with `develop` (one extra commit) and `feature` branched from the first commit. */
+/** Creates a repo with `develop` and `feature`, both pointing at the first commit. */
 function createRepoWithFeatureBranch() {
   let repo = TempRepo.create({ "a.txt": "a1\n", "b.txt": "b1\n", "gone.txt": "bye\n", "old name.txt": "x\n" });
   cleanups.push(() => repo.dispose());

@@ -32,8 +32,8 @@ export interface ReviewSession {
 }
 
 export type SessionRole = "review" | "followup";
-export type Severity = "Critical" | "Major" | "Minor" | "Note";
-export const severities: readonly Severity[] = ["Critical", "Major", "Minor", "Note"];
+export const severities = ["Critical", "Major", "Minor", "Note"] as const;
+export type Severity = typeof severities[number];
 export type ThreadStatus = "open" | "resolved";
 /** 'modified' = working-tree file; 'base' = file content at the merge-base */
 export type DiffSide = "modified" | "base";

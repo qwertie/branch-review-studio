@@ -2,7 +2,7 @@
   "name": "branch-review-studio",
   "displayName": "Branch Review Studio",
   "description": "Review a branch's working tree against its merge-base with develop, with comment threads exchanged with Claude Code agents.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "barreleye",
   "private": true,
   "license": "UNLICENSED",
@@ -104,6 +104,27 @@
         "title": "Delete Thread",
         "category": "Branch Review Studio",
         "icon": "$(trash)"
+      },
+      {
+        "command": "branchReviewStudio.askAgent",
+        "title": "Ask Agent",
+        "category": "Branch Review Studio",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "branchReviewStudio.installMcpServer",
+        "title": "Install MCP Server for Claude Code",
+        "category": "Branch Review Studio"
+      },
+      {
+        "command": "branchReviewStudio.installSkill",
+        "title": "Install Claude Skill",
+        "category": "Branch Review Studio"
+      },
+      {
+        "command": "branchReviewStudio.uninstall",
+        "title": "Uninstall MCP Server and Claude Skill",
+        "category": "Branch Review Studio"
       }
     ],
     "menus": {
@@ -151,6 +172,11 @@
           "command": "branchReviewStudio.reply",
           "when": "commentController == branch-review-studio && !commentThreadIsEmpty",
           "group": "inline@1"
+        },
+        {
+          "command": "branchReviewStudio.askAgent",
+          "when": "commentController == branch-review-studio",
+          "group": "inline@2"
         }
       ],
       "comments/commentThread/title": [
@@ -202,6 +228,10 @@
         {
           "command": "branchReviewStudio.deleteThread",
           "when": "false"
+        },
+        {
+          "command": "branchReviewStudio.askAgent",
+          "when": "false"
         }
       ]
     },
@@ -222,6 +252,11 @@
           "type": "string",
           "default": "",
           "description": "Folder in which Switch Branch creates new worktrees. Empty means a sibling folder of the main worktree named `<repoName>.worktrees`."
+        },
+        "branchReviewStudio.claudePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path of the Claude Code CLI (claude.exe or claude). Empty means search PATH, then ~/.local/bin."
         }
       }
     }

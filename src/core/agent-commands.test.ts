@@ -55,13 +55,21 @@ describe("buildClaudeArgs", () => {
   it("resumes and forks the review session in an interactive terminal", () => {
     let args = buildClaudeArgs({ prompt: "hi\nthere", sessionMode: "fork", resumeSessionId: "s-1",
       runMode: "interactive" });
-    expect(args).toEqual(["--resume", "s-1", "--fork-session", "hi\nthere"]);
+    expect(args).toEqual(["--allowedTools", `mcp__${mcpServerName}`, "--resume", "s-1", "--fork-session",
+      "hi\nthere"]);
   });
 
   it("starts a fresh print-mode session with stream-json output that may call the MCP tools", () => {
+    // --allowedTools takes a variable number of values, so it must not come right before the prompt
     expect(buildClaudeArgs({ prompt: "hi", sessionMode: "fresh", runMode: "background" })).toEqual([
-      "-p", "--output-format", "stream-json", "--verbose", "--allowedTools", `mcp__${mcpServerName}`, "hi",
+      "--allowedTools", `mcp__${mcpServerName}`, "-p", "--output-format", "stream-json", "--verbose", "hi",
     ]);
+  });
+
+  it("forks in the background with a preassigned id for the new session", () => {
+    let args = buildClaudeArgs({ prompt: "hi", sessionMode: "fork", resumeSessionId: "s-1", newSessionId: "s-2",
+      runMode: "background" });
+    expect(args.slice(-6)).toEqual(["--resume", "s-1", "--fork-session", "--session-id", "s-2", "hi"]);
   });
 
   it("refuses to fork without a session id", () => {
