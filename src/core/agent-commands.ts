@@ -4,6 +4,26 @@ import { AgentKind, getAuthorLabel, Review, ReviewThread } from "./review";
 /** Name under which the MCP server is registered with agents (`claude mcp add <name>`). */
 export const mcpServerName = "branch-review-studio";
 
+/** Tells an agent how to post findings; review_begin returns it. */
+export const findingInstructions = "Post each finding with review_comment: file, line (and endLine for a range), "
+  + "severity (Critical, Major, Minor or Note) and a markdown body that states the concrete consequence. Line "
+  + "numbers refer to the working-tree file; for removed code, use side \"base\" and line numbers in the merge-base "
+  + "version.";
+
+/**
+ * Tells an agent how to group the changes and post the groups; review_begin returns it, and the
+ * skill (skills/branch-review-studio/SKILL.md) quotes it verbatim.
+ */
+export const groupingInstructions = "Group the changes: partition them by apparent independence, so that "
+  + "unrelated or tenuously related changes are in different groups; one file's changes may span groups, and a "
+  + "frontend change and a backend change may share a group. Post the groups with review_set_groups: give each "
+  + "group an id, a name (a short heading) and a short markdown summary of what its changes do, and list every "
+  + "changed file with its groups. For a file in more than one group, give each of its groups `ranges`: the "
+  + "working-tree lines (1-based, inclusive) of that group's changes in the file; for removed lines, give the "
+  + "working-tree line just above or below where they were. A change that the ranges of several groups overlap "
+  + "appears in each of those groups; a change that no range covers appears in all of the file's groups. Calling "
+  + "review_set_groups again replaces the groups.";
+
 /**
  * 'fork' = fork the review session (e.g. `claude --resume <id> --fork-session`); 'fresh' = start a
  * new one
@@ -72,10 +92,10 @@ export function buildThreadPrompt(context: ThreadMessageContext, sessionMode: Ag
 export function buildReviewPrompt(branch: string, baseBranch: string): string {
   return `Review branch \`${branch}\`, following the ${mcpServerName} skill if you have it, and post your `
     + `findings as Branch Review Studio threads with the \`${mcpServerName}\` MCP tools: call review_begin with `
-    + `baseBranch "${baseBranch}", post each finding `
-    + "with review_comment (file, line, severity, body), then call review_finish with an overall summary. "
-    + "The changes to review are the working tree, including uncommitted and untracked files, compared with "
-    + `the merge-base of HEAD and ${baseBranch} (review_begin reports it).`;
+    + `baseBranch "${baseBranch}" and follow the instructions it returns to post each finding `
+    + "with review_comment, post groups of related changes with review_set_groups, and call review_finish with an "
+    + "overall summary. The changes to review are the working tree, including uncommitted and untracked files, "
+    + `compared with the merge-base of HEAD and ${baseBranch} (review_begin reports it).`;
 }
 
 /** Parameters of `AgentIntegration.buildArgs`. */

@@ -27,6 +27,63 @@ export interface Review {
   summary?: string;
   sessions: ReviewSession[];
   threads: ReviewThread[];
+  /** Groups of related changes, posted by the review_set_groups tool */
+  changeGroups?: ChangeGroups;
+}
+
+/**
+ * The groups of related changes that an agent posted (see createChangeGroups), with each grouped
+ * file's diff hunks frozen at that time. Since hunks are stored by merge-base line numbers, later
+ * edits of the working tree don't invalidate them; a new merge-base does.
+ */
+export interface ChangeGroups {
+  /** Merge-base when the groups were posted; `GroupedHunk.oldStart` refers to it */
+  mergeBaseSha: string;
+  /** ISO timestamp */
+  createdAt: string;
+  /** In the agent's order */
+  groups: ChangeGroup[];
+  files: GroupedFile[];
+}
+
+/** A group of related changes. */
+export interface ChangeGroup {
+  /** Chosen by the agent; unique within ChangeGroups */
+  id: string;
+  name: string;
+  /** Markdown */
+  summary: string;
+}
+
+/** A file's hunks at the time the groups were posted, with the groups that each belongs to. */
+export interface GroupedFile {
+  /** Repo-relative path with forward slashes */
+  file: string;
+  /**
+   * Groups that the agent listed for the file. The views of all of them show the file's unassigned
+   * hunks, and, if the file has no hunks (e.g. a binary file), the tree lists it under all of them.
+   */
+  groupIds: string[];
+  /** In file order */
+  hunks: GroupedHunk[];
+}
+
+/**
+ * A diff hunk (see DiffHunk) stored by merge-base line numbers: base lines
+ * oldStart..oldStart+oldCount-1 became `newCount` lines. If oldCount is 0, the lines were inserted
+ * after base line oldStart (0 = at the top).
+ */
+export interface GroupedHunk {
+  oldStart: number;
+  oldCount: number;
+  newCount: number;
+  /**
+   * The new lines, each with its line terminator; omitted if no group's view of the file needs them,
+   * i.e. if `groupIds` is empty or includes all of `GroupedFile.groupIds` (see buildGroupViewText)
+   */
+  newLines?: string[];
+  /** Groups whose line ranges overlap the hunk; empty if the hunk is unassigned */
+  groupIds: string[];
 }
 
 /** An agent session (Claude Code session or Codex thread) that contributed to a review. */
@@ -166,6 +223,11 @@ export function findLatestSession(review: Review, role: SessionRole): ReviewSess
 export function getAuthorLabel(thread: ReviewThread, comment: ReviewComment): string {
   let isOpeningAgentComment = comment.author.kind === "agent" && thread.comments[0] === comment;
   return isOpeningAgentComment && thread.severity ? `${comment.author.name} (${thread.severity})` : comment.author.name;
+}
+
+/** Formats a count with a noun that takes "s" in the plural, e.g. "1 line" or "3 open threads". */
+export function formatCount(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 /** Creates an 8-hex-digit id not used by any thread or comment in `review`. */

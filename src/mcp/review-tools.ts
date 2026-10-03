@@ -1,12 +1,14 @@
 import * as path from "node:path";
+import { findingInstructions, groupingInstructions } from "../core/agent-commands";
 import { createAnchor, locateAnchor } from "../core/anchoring";
 import { claudeIntegration } from "../core/claude-cli";
 import { codexIntegration } from "../core/codex-cli";
 import { getRepoRelativePath, readFileLines } from "../core/files";
-import { findMergeBase, findRepoRoot, getCurrentBranch, getGitCommonDir } from "../core/git";
+import { findMergeBase, findRepoRoot, getChangedFiles, getCurrentBranch, getGitCommonDir } from "../core/git";
+import { arrangeGroups, ChangeGroupsInput, createChangeGroups, describeGroupSize } from "../core/groups";
 import {
-  addComment, addThread, AgentKind, createReview, DiffSide, getBaseBranchName, getThread, recordSession, Review,
-  ReviewThread, SessionRole, Severity, ThreadStatus,
+  addComment, addThread, AgentKind, createReview, DiffSide, formatCount, getBaseBranchName, getThread, recordSession,
+  Review, ReviewThread, SessionRole, Severity, ThreadStatus,
 } from "../core/review";
 import { ReviewStore } from "../core/store";
 
@@ -67,8 +69,9 @@ export class ReviewTools {
     return [
       `Review of branch '${target.branch}' vs ${review.baseBranch} (merge-base ${review.mergeBaseSha}) is ready.`,
       `The reviewed changes are the working tree (including uncommitted and untracked files) vs the merge-base: `
-        + `\`git diff ${review.mergeBaseSha}\` plus \`git ls-files --others --exclude-standard\`. `
-        + "Line numbers in review_comment refer to working-tree files (side 'modified').",
+        + `\`git diff ${review.mergeBaseSha}\` plus \`git ls-files --others --exclude-standard\`.`,
+      `How to post the review:\n\n${findingInstructions}\n\n${groupingInstructions}\n\n`
+        + "Finally, call review_finish with a markdown summary.",
       openThreads.length === 0
         ? "There are no open threads yet."
         : "Open threads already exist; don't post duplicates of these:\n"
@@ -129,6 +132,27 @@ export class ReviewTools {
     return summary + (await this.formatThreads(target, review, threads, true));
   }
 
+  /**
+   * Replaces the review's groups of related changes (see createChangeGroups) and describes them,
+   * smallest first, plus anything the agent may want to correct.
+   */
+  async setGroups(args: ChangeGroupsInput): Promise<string> {
+    let target = await this.findTarget();
+    // Updates the merge-base, so that the groups match the merge-base that the extension shows
+    let { mergeBaseSha } = await this.beginReviewCore(target, {});
+    let changedFiles = await getChangedFiles(target.repoRoot, mergeBaseSha);
+    let { changeGroups, notes } = await createChangeGroups(target.repoRoot, mergeBaseSha, changedFiles, args);
+    await this.modifyReview(target, review => {
+      review.changeGroups = changeGroups;
+    });
+    let layout = arrangeGroups(changeGroups, changedFiles.map(f => f.path), mergeBaseSha);
+    let groupLines = layout.groups.map(g => `- ${g.name} (${describeGroupSize(g)}): `
+      + g.files.map(f => f.path + (f.isPartial ? " (partial)" : "")).join(", "));
+    let result = "Saved the groups. Branch Review Studio shows them smallest first:\n" + groupLines.join("\n");
+    return notes.length === 0 ? result : result + "\n\nTo correct the following, call review_set_groups again "
+      + "(it replaces the groups):\n" + notes.map(n => `- ${n}`).join("\n");
+  }
+
   /** Saves the review summary. */
   async finishReview(args: { summary: string }): Promise<string> {
     let target = await this.findTarget();
@@ -137,7 +161,7 @@ export class ReviewTools {
       this.recordCaller(review, "review");
     });
     let openCount = review.threads.filter(t => t.status === "open").length;
-    return `Saved the summary of the review of '${target.branch}', which has ${openCount} open threads.`;
+    return `Saved the summary of the review of '${target.branch}', which has ${formatCount(openCount, "open thread")}.`;
   }
 
   /**

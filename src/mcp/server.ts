@@ -4,7 +4,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { mcpServerName } from "../core/agent-commands";
+import { groupingInstructions, mcpServerName } from "../core/agent-commands";
 import { severities } from "../core/review";
 import { identifyCaller, ReviewTools } from "./review-tools";
 
@@ -24,7 +24,8 @@ async function main(): Promise<void> {
     description: "Starts (or resumes) the Branch Review Studio review of the git branch checked out in this "
       + "project, recording this session as the reviewer. The reviewed changes are the WORKING TREE "
       + "(including uncommitted and untracked files) vs `git merge-base origin/<baseBranch> HEAD`. Existing "
-      + "threads are kept; the result lists open ones so that you don't post duplicates. Call this first.",
+      + "threads are kept; the result lists open ones so that you don't post duplicates, and explains how to post "
+      + "findings and groups of related changes. Call this first.",
     inputSchema: {
       summary: z.string().optional().describe("Overall review summary (markdown); can also be set by review_finish"),
       baseBranch: z.string().optional()
@@ -68,6 +69,28 @@ async function main(): Promise<void> {
       status: z.enum(["open", "resolved", "all"]).optional().describe("Default 'open'"),
     },
   }, (args, extra) => runTool(extra, tools => tools.listThreads(args)));
+
+  let lineRange = z.object({ startLine: z.number().int(), endLine: z.number().int() });
+  server.registerTool("review_set_groups", {
+    description: "Posts the groups of related changes of the Branch Review Studio review, replacing any earlier "
+      + "groups. Branch Review Studio lists each group (smallest first) with its summary and files, and each group's "
+      + "diffs show only that group's changes. " + groupingInstructions,
+    inputSchema: {
+      groups: z.array(z.object({
+        id: z.string().describe("Short id, unique among the groups, e.g. 'parser'"),
+        name: z.string().describe("Heading shown in the tree, e.g. 'Fix CSV parser quoting'"),
+        summary: z.string().describe("Markdown: what the group's changes do"),
+      })),
+      files: z.array(z.object({
+        file: z.string().describe("Repo-relative (or absolute) path of a changed file"),
+        groups: z.array(z.object({
+          groupId: z.string(),
+          ranges: z.array(lineRange).optional().describe("Working-tree lines (1-based, inclusive) of this group's "
+            + "changes in the file; required if the file is in more than one group"),
+        })),
+      })),
+    },
+  }, (args, extra) => runTool(extra, tools => tools.setGroups(args)));
 
   server.registerTool("review_finish", {
     description: "Saves the overall review summary (markdown) after all findings are posted.",

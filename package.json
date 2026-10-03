@@ -2,7 +2,7 @@
   "name": "branch-review-studio",
   "displayName": "Branch Review Studio",
   "description": "Review a branch's working tree against its merge-base with develop, with comment threads exchanged with AI agents (Claude Code, Codex).",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "barreleye",
   "private": true,
   "license": "UNLICENSED",
@@ -45,6 +45,12 @@
       {
         "command": "branchReviewStudio.openAllChanges",
         "title": "Open All Changes",
+        "category": "Branch Review Studio",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "branchReviewStudio.openGroupChanges",
+        "title": "Open Group Changes",
         "category": "Branch Review Studio",
         "icon": "$(diff-multiple)"
       },
@@ -224,6 +230,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "branchReviewStudio.openGroupChanges",
+          "when": "false"
+        },
         {
           "command": "branchReviewStudio.openFileDiff",
           "when": "false"

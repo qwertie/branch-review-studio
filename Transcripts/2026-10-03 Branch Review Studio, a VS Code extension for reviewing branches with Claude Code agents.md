@@ -263,3 +263,43 @@ working tree (uncommitted in Barreleye).
 
 Unanswered: whether Install should add `default_tools_approval_mode = "approve"` for this server
 to `~/.codex/config.toml`.
+
+## S7. Follow-up: change groups
+
+### User
+
+> oh something that I forgot to mention, I think, is that `/branch-review` puts the changes into
+> groups. From the perspective of this extension, the groups could still exist but they would have
+> to be complete files, I think, right? [...] I think the way to meet this challenge is to allow the
+> same file to potentially go into multiple groups. I propose this algorithm: [per-file group
+> membership with conceptual-line counts and minor-line counts; groups with name and summary;
+> groups sorted smallest to largest; a cutoff for repeating a file under secondary groups with
+> three settings: min lines, min percentage, minor-line weight 0.2]. Implement this if it all makes
+> sense
+
+The assistant pointed out that a group's diff can show only that group's changes by serving a
+synthetic left side (merge-base plus other groups' changes) while the right side stays the real,
+editable file. Answers: "Only that group's changes"; thresholds "meet EITHER"; for Barreleye: "I'd
+like the branch-review command to have only minor changes. It should tell the agent to do this by
+pointing it at another file or command" (so the Step 8 hook became a two-line pointer to the
+instructions `review_begin` returns).
+
+> Your observation that the base file could be Modified to suppress lines from other groups is
+> astute and prima facie removes the need for the whole algorithm I presented and the 3 settings.
+> However, I wonder how this interacts with editing functionality. If a file is shown twice and
+> edited in one place, Whether it is edited by a human or by AI, that edit will definitely appear
+> in both places right? The design requires more thought than I have given it.
+
+The assistant explained that every view's right side is the same live document, and proposed
+freezing the grouping as hunks anchored to merge-base line numbers, so later edits never shift
+anything and simply appear in every view of the file. Answer: "Frozen hunks, no counts".
+
+```mermaid
+flowchart LR
+  Agent -- review_set_groups(groups, files+ranges) --> Tool[MCP tool]
+  Tool -- git diff -U0 at call time --> Hunks[hunks frozen by base line numbers + group ids]
+  Hunks --> Left["group G's left side = merge-base + hunks not in G"]
+  Live[live working file] --> Right[right side, editable]
+  Left --> View[group G's diff view]
+  Right --> View
+```

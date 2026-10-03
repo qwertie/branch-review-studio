@@ -5,6 +5,7 @@ import { getErrorMessage, getFullPath, getRepoRelativePath, readFileLines } from
 import {
   ChangedFile, findMergeBase, getChangedFiles, getConfigValue, getCurrentBranch, MergeBaseInfo,
 } from "../core/git";
+import { arrangeGroups, GroupLayout } from "../core/groups";
 import { createReview, DiffSide, getBaseBranchName, Review } from "../core/review";
 import { ReviewStore } from "../core/store";
 
@@ -19,10 +20,15 @@ export interface ReviewSnapshot {
   review: Review | undefined;
   /** Current location of each thread in `review`, by thread id */
   threadLocations: Map<string, AnchorLocation>;
+  /**
+   * The review's groups of related changes, as the tree shows them; undefined if the review has
+   * none. Its Ungrouped group includes unchanged files that have threads.
+   */
+  groupLayout: GroupLayout | undefined;
 }
 
 const emptySnapshot: ReviewSnapshot = { branch: undefined, mergeBase: undefined, mergeBaseError: undefined,
-  changedFiles: [], review: undefined, threadLocations: new Map() };
+  changedFiles: [], review: undefined, threadLocations: new Map(), groupLayout: undefined };
 
 /**
  * Holds the review state of one working tree (its branch, merge-base, changed files and review)
@@ -166,7 +172,12 @@ export class BranchReviewModel implements vscode.Disposable {
         linesByFile.set(key, this.getFileLines(thread.file, thread.side, mergeBase?.mergeBaseSha));
       threadLocations.set(thread.id, locateAnchor((await linesByFile.get(key)) ?? [], thread.anchor));
     }
-    return { branch, mergeBase, mergeBaseError, changedFiles, review, threadLocations };
+    let changedPaths = changedFiles.map(f => f.path);
+    let unchangedPathsWithThreads = [...new Set(review?.threads.map(t => t.file))]
+      .filter(file => !changedPaths.includes(file));
+    let groupLayout = review?.changeGroups && arrangeGroups(review.changeGroups, changedPaths,
+      mergeBase?.mergeBaseSha, unchangedPathsWithThreads);
+    return { branch, mergeBase, mergeBaseError, changedFiles, review, threadLocations, groupLayout };
   }
 
   private getBaseBranch(review: Review | undefined): string {

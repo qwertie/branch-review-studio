@@ -8,10 +8,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { AgentRunMode, AgentSessionMode, getAgentChoices } from "../src/core/agent-commands";
-import { getBaseBranchChoices, listBranches, MergeBaseInfo } from "../src/core/git";
+import { ChangedFile, getBaseBranchChoices, getFileAtRevision, listBranches, MergeBaseInfo } from "../src/core/git";
+import { applyHunks, DiffHunk, readDiffHunks } from "../src/core/hunks";
 import { AgentKind, createReview, findLatestSession } from "../src/core/review";
 import { ReviewStore } from "../src/core/store";
 import type { BranchReviewStudioExports } from "../src/extension/extension";
+import { ReviewTools } from "../src/mcp/review-tools";
 
 export async function run(): Promise<void> {
   let failures = 0;
@@ -71,6 +73,8 @@ export async function run(): Promise<void> {
       console.log(`INFO active editor=${editor?.document.uri.toString()} `
         + `selectionLine=${editor?.selection.active.line}`);
     });
+    await check("review_set_groups: the tree shows groups; group views show only their hunks", () =>
+      checkGroups(model));
     await check("settings relevant to inline diff and sticky scroll", () => {
       let config = vscode.workspace.getConfiguration();
       console.log(`INFO diffEditor.renderSideBySide=${config.get("diffEditor.renderSideBySide")} `
@@ -201,6 +205,68 @@ async function checkCodex(model: Model, check: (name: string, action: () => Prom
     review.threads = review.threads.filter(t => !addedThreadIds.includes(t.id));
     review.sessions = review.sessions.filter(s => originalSessionIds.has(s.sessionId));
   });
+}
+
+/**
+ * Posts groups with ReviewTools (as the MCP server would): the first and the other hunks of a
+ * modified file with several hunks go into groups "first" and "rest", and every other changed file
+ * into "rest". Checks the tree's layout and both kinds of diff editors, then restores the review's
+ * previous groups.
+ */
+async function checkGroups(model: Model) {
+  let { changedFiles, mergeBase } = model.snapshot;
+  let split: { file: ChangedFile, hunks: DiffHunk[] } | undefined;
+  for (let file of changedFiles.filter(f => f.status === "Modified")) {
+    let hunks = await readDiffHunks(model.repoRoot, mergeBase!.mergeBaseSha, file);
+    if (split === undefined && hunks.length >= 2 && hunks[0].newLines.length > 0)
+      split = { file, hunks };
+  }
+  assert.ok(split, "the test repo needs a modified file with two or more hunks");
+  let firstHunk = split.hunks[0];
+  let previousGroups = model.snapshot.review!.changeGroups;
+  let tools = new ReviewTools({ cwd: model.repoRoot, sessionId: undefined, agent: "claude", agentName: "Claude" });
+  try {
+    let result = await tools.setGroups({ groups: [{ id: "first", name: "Smoke: first hunk", summary: "The **first** "
+      + "hunk of a file with several hunks; this summary is long enough to be wrapped onto two lines in the tree." },
+    { id: "rest", name: "Smoke: the rest", summary: "Everything else." }],
+    files: changedFiles.map(f => f === split.file ? { file: f.path, groups: [
+      { groupId: "first", ranges: [{ startLine: firstHunk.newStart, endLine: firstHunk.newStart }] },
+      { groupId: "rest", ranges: split.hunks.slice(1).map(h => ({ startLine: Math.max(h.newStart, 1),
+        endLine: Math.max(h.newStart + h.newLines.length - 1, h.newStart, 1) })) }] }
+      : { file: f.path, groups: [{ groupId: "rest" }] }) });
+    console.log(`INFO review_set_groups: ${result}`);
+    await model.refresh();
+    let layout = model.snapshot.groupLayout;
+    console.log(`INFO layout: ${JSON.stringify(layout?.groups.map(g => [g.name, g.changedLines, g.files.length]))}`);
+    let firstGroup = layout?.groups.find(g => g.id === "first");
+    assert.deepEqual(firstGroup?.files, [{ path: split.file.path, isPartial: true }]);
+    assert.ok(layout?.groups.find(g => g.id === "rest")?.files.some(f => f.path === split.file.path && f.isPartial));
+
+    await vscode.commands.executeCommand("branchReviewStudio.openGroupChanges", firstGroup);
+    await delay(1500);
+    let tabs = vscode.window.tabGroups.all.flatMap(g => g.tabs);
+    assert.ok(tabs.some(t => t.label.includes("Smoke: first hunk")), `tabs: ${tabs.map(t => t.label).join(", ")}`);
+    await vscode.commands.executeCommand("branchReviewStudio.openFileDiff", split.file.path,
+      { groupId: "first", groupName: firstGroup!.name });
+    await delay(1000);
+    let input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    assert.ok(input instanceof vscode.TabInputTextDiff, "active tab is not a diff");
+    assert.equal(input.original.scheme, "brs-group");
+    let viewText = (await vscode.workspace.openTextDocument(input.original)).getText();
+    let baseText = await getFileAtRevision(model.repoRoot, mergeBase!.mergeBaseSha, split.file.path) ?? "";
+    let expected = applyHunks(baseText, split.hunks.slice(1));
+    assert.equal(viewText.replace(/\r\n/g, "\n"), expected.replace(/\r\n/g, "\n"),
+      "the first group's view should apply every hunk but the first");
+    if (process.env.BRS_SCREENSHOT_DIR) {
+      await vscode.commands.executeCommand("workbench.view.extension.branchReviewStudio");
+      await delay(2000);
+      captureWindow(path.join(process.env.BRS_SCREENSHOT_DIR, "groups.png"));
+    }
+  } finally {
+    await model.modifyReview(review => {
+      review.changeGroups = previousGroups;
+    });
+  }
 }
 
 /** Gets the index of an Ask Agent QuickPick item for a new thread, if both agents are found. */

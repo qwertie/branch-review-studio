@@ -192,9 +192,10 @@ function renderHowTo(model: BranchReviewModel | undefined): string {
   parallel sub-agents, which costs several times as many tokens. If the repo has its own review command
   that posts to Branch Review Studio (e.g. Barreleye's <code>/branch-review</code>), you can use that
   instead.</li>
-<li><b>Then:</b> the agent's findings appear as comment threads in the Branch Review view as it posts them. Answer
-  with <b>Reply</b>, or with <b>Ask Agent</b> to send your message to a fork of the reviewing session (with the
-  same agent) or to a fresh session.</li>
+<li><b>Then:</b> the agent's findings appear as comment threads in the Branch Review view as it posts them, and
+  if it posts groups of related changes, the view lists the files under their groups. Answer with <b>Reply</b>, or
+  with <b>Ask Agent</b> to send your message to a fork of the reviewing session (with the same agent) or to a fresh
+  session.</li>
 </ol>`;
 }
 

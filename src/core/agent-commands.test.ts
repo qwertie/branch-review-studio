@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { AgentChoice, buildReviewPrompt, buildThreadPrompt, getAgentChoices, mcpServerName } from "./agent-commands";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import {
+  AgentChoice, buildReviewPrompt, buildThreadPrompt, getAgentChoices, groupingInstructions, mcpServerName,
+} from "./agent-commands";
 import { createAnchor, splitLines } from "./anchoring";
 import { addComment, addThread, createReview } from "./review";
 
@@ -77,6 +81,15 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain("branch `feature/x`, following the " + mcpServerName + " skill if you have it");
     expect(prompt).toContain("`" + mcpServerName + "` MCP tools");
     expect(prompt).toContain('review_begin with baseBranch "develop"');
-    expect(prompt).toMatch(/review_comment.*review_finish/);
+    expect(prompt).toMatch(/follow the instructions it returns.*review_comment.*review_set_groups.*review_finish/);
+  });
+});
+
+describe("groupingInstructions", () => {
+  it("appears verbatim (up to line wrapping) in the skill", () => {
+    let skill = fs.readFileSync(path.join(__dirname, "../../skills/branch-review-studio/SKILL.md"), "utf8");
+    let normalize = (text: string) => text.replace(/\s+/g, " ");
+
+    expect(normalize(skill)).toContain(normalize(groupingInstructions));
   });
 });

@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { findingInstructions, groupingInstructions } from "../core/agent-commands";
 import { getGitCommonDir } from "../core/git";
 import { ReviewStore } from "../core/store";
 import { TempRepo } from "../core/test-helpers";
@@ -104,14 +105,101 @@ describe("ReviewTools", () => {
     await expect(followUp.replyToThread({ threadId: "nope", body: "x" })).rejects.toThrow(/nope/);
   });
 
+  it("beginReview explains how to post findings and groups", async () => {
+    let result = await createTools(createFeatureRepo()).beginReview({});
+
+    expect(result).toContain(findingInstructions);
+    expect(result).toContain(groupingInstructions);
+  });
+
+  it("setGroups freezes each file's hunks with their groups, reports the layout, and replaces earlier groups",
+    async () => {
+      let repo = createFeatureRepo();
+      repo.writeFiles({ "src/b.ts": "one\ntwo\nthree\n" });
+      let tools = createTools(repo);
+      let groups = [{ id: "a", name: "Return 2", summary: "Returns **2**." },
+        { id: "b", name: "New file b", summary: "Adds b." }, { id: "c", name: "Unused", summary: "" }];
+
+      let result = await tools.setGroups({ groups, files: [
+        { file: "src/a.ts", groups: [{ groupId: "a" }] },
+        { file: "src\\b.ts", groups: [{ groupId: "a", ranges: [{ startLine: 1, endLine: 1 }] },
+          { groupId: "b", ranges: [{ startLine: 2, endLine: 2 }, { startLine: 9, endLine: 9 }] }] },
+      ] });
+
+      let review = await readReview(repo);
+      expect(review.changeGroups).toMatchObject({ mergeBaseSha: review.mergeBaseSha, groups, files: [
+        { file: "src/a.ts", groupIds: ["a"], hunks: [{ oldStart: 3, oldCount: 1, newCount: 1, groupIds: ["a"] }] },
+        { file: "src/b.ts", groupIds: ["a", "b"], hunks: [
+          { oldStart: 0, oldCount: 0, newCount: 1, newLines: ["one\n"], groupIds: ["a"] },
+          { oldStart: 0, oldCount: 0, newCount: 1, newLines: ["two\n"], groupIds: ["b"] },
+          { oldStart: 0, oldCount: 0, newCount: 1, groupIds: [] },
+        ] },
+      ] });
+      expect(result).toBe("Saved the groups. Branch Review Studio shows them smallest first:\n"
+        + "- New file b (1 line, 1 file): src/b.ts (partial)\n"
+        + "- Return 2 (2 lines, 2 files): src/a.ts, src/b.ts (partial)\n\n"
+        + "To correct the following, call review_set_groups again (it replaces the groups):\n"
+        + "- src/b.ts: the range 9-9 of group 'b' overlaps no change.\n"
+        + "- src/b.ts: no range covers line 3, so these changes appear in every group that lists the file.\n"
+        + "- Group 'c' includes no changes, so Branch Review Studio doesn't show it.");
+
+      await tools.setGroups({ groups: [groups[1]], files: [{ file: "src/b.ts", groups: [{ groupId: "b" }] }] });
+      expect((await readReview(repo)).changeGroups).toMatchObject({ groups: [groups[1]],
+        files: [{ file: "src/b.ts", hunks: [{ newCount: 3, groupIds: ["b"] }] }] });
+    });
+
+  it("setGroups freezes the hunks against the current merge-base and saves it in the review", async () => {
+    let repo = createFeatureRepo();
+    let tools = createTools(repo);
+    await tools.beginReview({});
+    repo.writeFiles({ "src/c.ts": "c\n" });
+    repo.git("add", "src/c.ts");
+    repo.git("commit", "-q", "-m", "Add c");
+    repo.git("branch", "-f", "develop", "HEAD");
+
+    await tools.setGroups({ groups: [{ id: "a", name: "A", summary: "" }],
+      files: [{ file: "src/a.ts", groups: [{ groupId: "a" }] }] });
+
+    let review = await readReview(repo);
+    expect(review.mergeBaseSha).toBe(repo.git("rev-parse", "HEAD"));
+    expect(review.changeGroups?.mergeBaseSha).toBe(review.mergeBaseSha);
+  });
+
+  it("setGroups rejects invalid groups and files, listing every problem, and saves nothing", async () => {
+    let repo = createFeatureRepo();
+    let tools = createTools(repo);
+    await tools.beginReview({});
+    let group = { id: "a", name: "A", summary: "" };
+
+    let setGroups = tools.setGroups({ groups: [group, group, { id: "", name: "B", summary: "" }], files: [
+      { file: "README.md", groups: [{ groupId: "a" }] },
+      { file: "src/a.ts", groups: [{ groupId: "a", ranges: [{ startLine: 3, endLine: 2 }] }, { groupId: "x" }] },
+      { file: "src/a.ts", groups: [] },
+    ] });
+
+    await expect(setGroups).rejects.toThrow("review_set_groups found problems; nothing was saved:\n"
+      + "- Group id 'a' is used more than once.\n"
+      + "- Group ids and names must not be empty (id '', name 'B').\n"
+      + "- 'README.md' is not a changed file (see `git diff --name-status " + (await readReview(repo)).mergeBaseSha
+      + "`).\n"
+      + "- 'src/a.ts' refers to group 'x', which is not in `groups`.\n"
+      + "- 'src/a.ts' is in several groups, so each of its groups needs `ranges`.\n"
+      + "- 'src/a.ts' has an invalid range 3-2.\n"
+      + "- 'src/a.ts' is listed more than once.\n"
+      + "- 'src/a.ts' must list one or more groups, each once.");
+    expect((await readReview(repo)).changeGroups).toBeUndefined();
+  });
+
   it("finishReview saves the summary, and fails if there is no review", async () => {
     let repo = createFeatureRepo();
     let tools = createTools(repo);
     await expect(tools.finishReview({ summary: "s" })).rejects.toThrow(/review_begin/);
 
     await tools.beginReview({});
-    expect(await tools.finishReview({ summary: "All good." })).toContain("0 open threads");
+    expect(await tools.finishReview({ summary: "All good." })).toContain("which has 0 open threads.");
     expect((await readReview(repo)).summary).toBe("All good.");
+    await tools.addReviewComment({ file: "src/a.ts", line: 3, severity: "Major", body: "Why 2?" });
+    expect(await tools.finishReview({ summary: "One finding." })).toContain("which has 1 open thread.");
   });
 });
 

@@ -11,15 +11,21 @@ rather than humans.
   `baseBranch` argument) and keeps it until you run **Change Base Branch…**.
 - Clicking a file opens a diff editor (merge-base vs. working file). The modified side is the real
   file, so you can edit it in place. **Open All Changes** opens all files in one multi-diff editor.
+- If the reviewing agent posts groups of related changes, the view lists the files under their
+  groups, smallest group first, and each group's diffs show only that group's changes (see
+  "Groups of related changes" below).
 - Review comments appear as comment threads (VS Code Comments API) in the diff editor, in normal
   editors, and in the Comments panel. You can reply, resolve, reopen, delete, and start new threads
   on changed files.
 - **Switch Branch…** opens the worktree of the branch you pick, creating a worktree first if there
   is none. Reviews are stored per branch, so each worktree window shows its own branch's review.
 - Agents (Claude Code, Codex) post review findings as threads through the extension's MCP server
-  (`review_begin`, `review_comment`, `review_reply`, `review_resolve`, `review_list`,
-  `review_finish`). The server records which session posted each thread: Claude Code's session id
-  (`CLAUDE_CODE_SESSION_ID`) or Codex's thread id (which Codex sends with every tool call).
+  (`review_begin`, `review_comment`, `review_set_groups`, `review_reply`, `review_resolve`,
+  `review_list`, `review_finish`). `review_begin`'s result explains how to post findings and
+  groups, so a repo's own review command needs to say only "call review_begin and follow the
+  instructions it returns". The server records which session posted each thread: Claude Code's
+  session id (`CLAUDE_CODE_SESSION_ID`) or Codex's thread id (which Codex sends with every tool
+  call).
 - **Ask Agent** (next to **Reply** in a thread) saves your message and sends it, with the thread's
   context, to an agent: by default as a fork of the session that wrote the review, with the agent
   that ran it (`claude --resume <id> --fork-session` or `codex fork <id>`, which reuses its prompt
@@ -66,8 +72,9 @@ The Branch Review Studio panel (gear button) shows these steps too.
    prompt that the panel's **Copy Review Prompt** button copies, e.g. "Review branch `feature/x`,
    following the branch-review-studio skill if you have it, and post your findings as Branch
    Review Studio threads with the `branch-review-studio` MCP tools: call review_begin with
-   baseBranch "develop", ...". The skill reviews in a single context; add "be thorough" (or
-   `--thorough`) for a review by parallel sub-agents, which costs several times as many tokens.
+   baseBranch "develop" and follow the instructions it returns, ...". The skill reviews in a
+   single context; add "be thorough" (or `--thorough`) for a review by parallel sub-agents, which
+   costs several times as many tokens.
    If the repo has its own review command that posts to Branch Review Studio (e.g. Barreleye's
    `/branch-review`), you can use that instead.
 3. The agent's findings appear as comment threads in the Branch Review view as it posts them.
@@ -78,8 +85,9 @@ fetches the base branch, checks whether the branch is behind it, runs the repo's
 its docs and manifests), reviews correctness, security, performance, project conventions (from
 `CLAUDE.md`, `AGENTS.md` and skill/rule docs) and dependency changes, skips findings that existing
 threads already raise, posts Critical and Major findings (plus Minor with `--all`) as threads,
-and summarizes the changes and findings in chat. Options: `--all`, `--no-tests`,
-`--base <branch>`, `--thorough`, plus free-form context. It never switches branches or stashes.
+posts groups of related changes, and summarizes the changes and findings in chat. Options:
+`--all`, `--no-tests`, `--base <branch>`, `--thorough`, plus free-form context. It never switches
+branches or stashes.
 
 ## Usage
 
@@ -139,6 +147,44 @@ worktree), `branchReviewStudio.openWorktreeInNewWindow` (default false),
 `branchReviewStudio.codexPath` (default: the Codex CLI bundled with the Codex VS Code extension
 `openai.chatgpt` if installed, since it is usually newer than the one on PATH, else `codex` on PATH).
 
+## Groups of related changes
+
+A review can divide the branch's changes into groups of related changes, e.g. "Fix CSV quoting" and
+"Rename `Widget` to `Gadget`", so that you can review one topic at a time.
+
+- **Posting:** the agent calls `review_set_groups` with the groups (`id`, `name`, markdown
+  `summary`) and, for each changed file, its groups. For a file in more than one group, it gives
+  each group's `ranges`: the working-tree lines (1-based, inclusive) of that group's changes; for
+  removed lines, the working-tree line just above or below where they were. Calling it again
+  replaces the groups.
+- **Freezing:** the tool then reads each listed file's hunks (`git diff -U0 <merge-base>`; a new or
+  deleted file is one hunk, a binary file has none) and assigns each hunk to every group whose
+  ranges overlap its new lines (a removal: the line above or below it). A hunk that only adds lines
+  is split where the groups whose ranges include its lines change, so a new file can be divided
+  among groups; other hunks stay whole, so they can belong to several groups. A hunk that no range overlaps is unassigned.
+  The review JSON stores the hunks by merge-base line numbers (with their new lines where a view
+  needs them), plus the merge-base, so later edits don't shift them. The tool's result lists
+  ranges that overlap no change and changes that no range covers, so the agent can correct them.
+- **Tree:** each group is a row with its name, size and number of files (tooltip: the summary),
+  followed by its summary (dimmed) and its files, each with its threads. A file appears under every
+  group whose view of it shows a change (one of the group's hunks or an unassigned hunk), and a file
+  without hunks under every group listed for it; "partial" marks a file of which the group shows
+  only some changes. Groups are sorted by size, smallest first, where size = the number of changed
+  lines in the group's hunks (per hunk, the larger of its removed and added line counts, so a
+  modified line counts once). Changed files that no group includes (e.g. files changed after the groups were
+  posted) and unchanged files with threads are listed last, under **Ungrouped**. Grouped files
+  that are no longer changed are hidden. Without groups, the tree lists the files by path.
+- **Diffs:** clicking a group opens its files in a multi-diff editor titled with the group's name;
+  clicking a file under a group opens that group's view of the file. In a group's view, the left
+  side is the merge-base version with the hunks that belong only to other groups applied, so the
+  diff shows this group's hunks, unassigned hunks, and any changes made after the groups were
+  posted. The right side is the real file, so editing and comment threads work as usual, but
+  threads on the base side and new comments on the left side are available only in the whole-file
+  diff (the diff button on the file's row, or **Open All Changes**).
+- **Stale groups:** if the merge-base changes (e.g. after **Fetch Base Branch** or **Change Base
+  Branch…**), the frozen hunks no longer apply, so the diffs show whole files and the group rows
+  say "regroup: merge-base changed"; ask the agent to post the groups again.
+
 ## Branch Review Studio panel
 
 The gear button in the Branch Review view's title bar (or the command **Branch Review Studio:
@@ -165,7 +211,8 @@ The extension and MCP server do not modify any tracked files in your repos. They
   which all worktrees of a repo share. Git ignores it because it is inside `.git`.
   - `README.txt` explains where the folder came from; it is safe to delete the whole folder.
   - `reviews/<branch>.json` holds one branch's review (branch name percent-encoded, e.g.
-    `feature%2Fx.json`). Each file starts with a `"$comment"` explaining its origin.
+    `feature%2Fx.json`): its threads, sessions, summary and groups. Each file starts with a
+    `"$comment"` explaining its origin.
   - `reviews/<branch>.json.lock` exists briefly while a review is being saved.
   - The folder is created when the first review or comment is saved.
 - New worktrees, only when you create one with **Switch Branch…**.

@@ -8,9 +8,10 @@ description: Reviews the current git branch before it is merged - the working tr
 You (Claude Code or Codex) review the branch checked out in your project folder, post the
 findings to Branch Review Studio, and summarize them in chat. Branch Review Studio is a VS Code
 extension in which the developer reads findings as comment threads on the diff and answers them.
-Its MCP server (`branch-review-studio`) provides `review_begin`, `review_comment`, `review_reply`,
-`review_resolve`, `review_list` and `review_finish`, which act on the branch checked out in your
-project folder. If those tools are not available, do the review anyway and report it in chat only.
+Its MCP server (`branch-review-studio`) provides `review_begin`, `review_comment`,
+`review_set_groups`, `review_reply`, `review_resolve`, `review_list` and `review_finish`, which act
+on the branch checked out in your project folder. If those tools are not available, do the review
+anyway and report it in chat only.
 
 Re-runs should converge instead of producing a fresh pile of pedantic noise: respect the threshold
 below and don't re-raise what existing threads already say.
@@ -182,10 +183,21 @@ Without subagents, do all of these passes yourself, in sequence, and say so in t
 
 ### Grouping (in parallel with the reviewers, or after your own review)
 
-Partition the changes into groups by apparent independence, so that unrelated or tenuously
-related changes are in different groups. Read enough context to see which class and method each
-change is in. Group functionally: one file's changes may span groups, and a frontend change and a
-backend change may share a group.
+Read enough context to see which class and method each change is in, so that you can group the
+changes functionally:
+
+Group the changes: partition them by apparent independence, so that unrelated or tenuously related
+changes are in different groups; one file's changes may span groups, and a frontend change and a
+backend change may share a group. Post the groups with review_set_groups: give each group an id, a
+name (a short heading) and a short markdown summary of what its changes do, and list every changed
+file with its groups. For a file in more than one group, give each of its groups `ranges`: the
+working-tree lines (1-based, inclusive) of that group's changes in the file; for removed lines, give
+the working-tree line just above or below where they were. A change that the ranges of several
+groups overlap appears in each of those groups; a change that no range covers appears in all of the
+file's groups. Calling review_set_groups again replaces the groups.
+
+(Branch Review Studio then lists the groups, smallest first, each with its summary and files, and
+each group's diffs show only that group's changes.)
 
 ## Step 5 — Merge, filter and group the findings
 
@@ -207,6 +219,9 @@ If the tools are available, post without asking (it only writes to the developer
   range), `severity`, and a markdown `body` with the description and its concrete consequence.
   Line numbers refer to the working-tree file; for removed code, use `side: "base"` and line
   numbers in the merge-base version.
+- `review_set_groups` with the groups from Step 4 (see Grouping there). If its result lists a
+  range that overlaps no change, or a change that no range covers although you meant to assign it,
+  correct the ranges and call it again.
 - `review_finish` with a markdown summary: tests, branch tracking, dependency verdicts, and one
   line per group with its finding counts.
 

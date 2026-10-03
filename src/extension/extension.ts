@@ -6,10 +6,10 @@ import { IntegrationErrorLog } from "../core/integration-status";
 import { ReviewStore } from "../core/store";
 import { AgentServices } from "./agents";
 import { askAgent } from "./ask-agent";
-import { BaseContentProvider, baseScheme } from "./base-content";
+import { BaseContentProvider, baseScheme, GroupViewContentProvider, groupViewScheme } from "./base-content";
 import { changeBaseBranch } from "./change-base-branch";
 import { ReviewCommentController } from "./comments";
-import { fetchBase, openAllChanges, openFileDiff, openThread } from "./diff-commands";
+import { fetchBase, openAllChanges, openFileDiff, openGroupChanges, openThread } from "./diff-commands";
 import { installMcpServer, installSkill, uninstall, updateInstalledServerIfOutdated } from "./install";
 import { BranchReviewModel } from "./model";
 import { ReviewTreeNode, ReviewTreeProvider } from "./review-tree";
@@ -38,9 +38,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<Branch
   } else {
     let comments = new ReviewCommentController(model);
     let tree = new ReviewTreeProvider(model);
-    context.subscriptions.push(model, comments, tree,
+    let groupViews = new GroupViewContentProvider(model);
+    context.subscriptions.push(model, comments, tree, groupViews,
       vscode.window.registerTreeDataProvider("branchReviewStudio.files", tree),
-      vscode.workspace.registerTextDocumentContentProvider(baseScheme, new BaseContentProvider()));
+      vscode.workspace.registerTextDocumentContentProvider(baseScheme, new BaseContentProvider()),
+      vscode.workspace.registerTextDocumentContentProvider(groupViewScheme, groupViews));
     registerCommands(context, model, services, comments);
     await watchForChanges(context, model);
     await model.refresh();
@@ -77,9 +79,12 @@ function registerCommands(context: vscode.ExtensionContext, model: BranchReviewM
   let commands: Record<string, (model: BranchReviewModel, ...args: never[]) => unknown> = {
     refresh: m => m.refresh(),
     openAllChanges,
-    openFileDiff: (m, arg?: string | ReviewTreeNode) => {
+    openGroupChanges,
+    // A tree row's click passes the file and, for a group's view, the group; its diff button passes the node
+    openFileDiff: (m, arg?: string | ReviewTreeNode, view?: { groupId: string, groupName: string }) => {
       let file = typeof arg === "string" ? arg : arg?.kind === "file" ? arg.file.path : getActiveEditorFile(m);
-      return file === undefined ? undefined : openFileDiff(m, file);
+      return file === undefined ? undefined : openFileDiff(m, file, undefined, typeof arg === "string" ? view
+        : undefined);
     },
     openFile: (m, node?: ReviewTreeNode) => node?.kind === "file"
       ? vscode.window.showTextDocument(vscode.Uri.file(m.getFullPath(node.file.path))) : undefined,
