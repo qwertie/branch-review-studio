@@ -4,9 +4,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   addWorktree, findMergeBase, findRepoRoot, getBaseBranchChoices, getChangedFiles, getCurrentBranch,
   getDefaultWorktreePath, getFileAtRevision, getGitCommonDir, listBranches, listWorktrees, parseBranchRefs,
-  parseWorktreeList,
+  parseWorktreeList, runGit,
 } from "./git";
-import { createTempDir, TempRepo } from "./test-helpers";
+import { createTempDir, TempRepo, waitForKilledProcesses } from "./test-helpers";
 
 let cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -116,6 +116,21 @@ describe("repo queries", () => {
     let { repo, firstSha } = createRepoWithFeatureBranch();
     repo.git("checkout", "-q", firstSha);
     expect(await getCurrentBranch(repo.root)).toBeUndefined();
+  });
+});
+
+describe("runGit", () => {
+  it("kills git after the timeout or when the signal aborts it, and throws", async () => {
+    let { repo } = createRepoWithFeatureBranch();
+    // Without input, `git hash-object --stdin` waits until stdin closes, which runGit never does
+    let waitingArgs = ["hash-object", "--stdin"];
+
+    await expect(runGit(repo.root, waitingArgs, { timeoutMs: 300 })).rejects.toThrow(/timed out after 300 ms/);
+    let controller = new AbortController();
+    let running = runGit(repo.root, waitingArgs, { signal: controller.signal });
+    setTimeout(() => controller.abort(), 300);
+    await expect(running).rejects.toThrow(/was cancelled/);
+    await waitForKilledProcesses();
   });
 });
 

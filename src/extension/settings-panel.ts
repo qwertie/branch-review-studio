@@ -7,14 +7,20 @@ import { buildReviewPrompt, mcpServerName } from "../core/agent-commands";
 import { AgentIntegration, runAgentCommand } from "../core/agent-integration";
 import { getBaseBranchChoices, listBranches } from "../core/git";
 import { checkIntegrationStatus, IntegrationStatus, isIntegrationAvailable } from "../core/integration-status";
+import { getModelPreference, languageModelDisplayName } from "../core/language-model";
+import { formatCount, IntegrationId } from "../core/review";
 import { agentIntegrations, AgentServices, codexExtensionId, findAgentCommand } from "./agents";
 import { changeBaseBranchIfConfirmed } from "./change-base-branch";
 import { installForAgent, uninstallForAgent } from "./install";
+import {
+  checkLanguageModelStatus, chooseLanguageModel, getLanguageModelSetting, LanguageModelStatus,
+  noLanguageModelsMessage,
+} from "./language-models";
 import { BranchReviewModel } from "./model";
 
 /** A message that the panel's webview script posts when the user clicks a button. */
 interface PanelMessage {
-  command: "changeBaseBranch" | "copyReviewPrompt" | "recheck" | "install" | "uninstall";
+  command: "changeBaseBranch" | "copyReviewPrompt" | "recheck" | "install" | "uninstall" | "chooseModel";
   /** The agent of the integration whose button was clicked */
   agent?: string;
   /** The base branch selected in the panel */
@@ -24,18 +30,30 @@ interface PanelMessage {
 /**
  * The "Branch Review Studio" panel (a webview in the editor area, since VS Code has no rich modal
  * dialogs). It explains how to start a review, lets the user change the base branch, and shows
- * the status of each agent integration, which it checks when it opens and on Re-check.
+ * the status of each agent integration, which it checks when it opens and on Re-check, and of VS
+ * Code's language models, which it also checks when they or the chosen model change.
  */
 export class SettingsPanel {
   private static current: SettingsPanel | undefined;
   /** Status of each integration; undefined while checking */
   private statuses: IntegrationStatus[] | undefined;
+  /** Status of the VS Code Language Models integration; undefined while checking */
+  private languageModelStatus: LanguageModelStatus | undefined;
+  /** What the language model section showed when last rendered (see getLanguageModelState) */
+  private renderedLanguageModelState = "";
   /** What the branch section showed when last rendered (see getBranchState) */
   private renderedBranchState = "";
 
   private constructor(private readonly panel: vscode.WebviewPanel, private readonly model: BranchReviewModel
     | undefined, private readonly services: AgentServices) {
-    let subscriptions = [panel.webview.onDidReceiveMessage((message: PanelMessage) => this.handleMessage(message))];
+    let subscriptions = [panel.webview.onDidReceiveMessage((message: PanelMessage) => this.handleMessage(message)),
+      vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration("branchReviewStudio.languageModel"))
+          void this.checkLanguageModels();
+      })];
+    // Editors based on VS Code may lack the Language Model API
+    if (vscode.lm?.onDidChangeChatModels)
+      subscriptions.push(vscode.lm.onDidChangeChatModels(() => void this.checkLanguageModels()));
     if (model) {
       subscriptions.push(model.onDidChange(() => {
         // Re-rendering resets the scroll position, so it happens only if the branch section changes
@@ -66,12 +84,27 @@ export class SettingsPanel {
     void SettingsPanel.current?.render();
   }
 
+  /** Gets the open panel's HTML, for scripts/smoke-test.ts; undefined if the panel isn't open. */
+  static getHtmlIfOpen(): string | undefined {
+    return SettingsPanel.current?.panel.webview.html;
+  }
+
   private async checkStatuses(): Promise<void> {
     this.statuses = undefined;
+    this.languageModelStatus = undefined;
     await this.render();
-    this.statuses = await Promise.all(agentIntegrations.map(integration =>
-      checkIntegrationStatus(integration, findAgentCommand(integration), runAgentCommand)));
+    [this.statuses, this.languageModelStatus] = await Promise.all([Promise.all(agentIntegrations.map(integration =>
+      checkIntegrationStatus(integration, findAgentCommand(integration), runAgentCommand))),
+    checkLanguageModelStatus(this.services.context)]);
     await this.render();
+  }
+
+  /** Checks the language models again, and re-renders if the result differs from what is shown. */
+  private async checkLanguageModels(): Promise<void> {
+    this.languageModelStatus = await checkLanguageModelStatus(this.services.context);
+    // Re-rendering resets the scroll position, and the models may change often (e.g. as extensions load)
+    if (getLanguageModelState(this.languageModelStatus) !== this.renderedLanguageModelState)
+      await this.render();
   }
 
   private async handleMessage(message: PanelMessage): Promise<void> {
@@ -86,6 +119,8 @@ export class SettingsPanel {
       void vscode.window.showInformationMessage("Copied the review prompt. Paste it into Claude Code or Codex.");
     } else if (message.command === "recheck") {
       await this.checkStatuses();
+    } else if (message.command === "chooseModel") {
+      await chooseLanguageModel();
     } else if ((message.command === "install" || message.command === "uninstall") && integration) {
       await (message.command === "install" ? installForAgent : uninstallForAgent)(this.services, integration);
       await this.checkStatuses();
@@ -95,10 +130,12 @@ export class SettingsPanel {
   private async render(): Promise<void> {
     let nonce = randomBytes(16).toString("hex");
     this.renderedBranchState = this.getBranchState();
+    this.renderedLanguageModelState = getLanguageModelState(this.languageModelStatus);
     let branchSection = this.model ? await this.renderBranchSection(this.model)
       : "<p>No workspace folder is in a git repo.</p>";
     let integrationRows = agentIntegrations.map(i => this.renderIntegration(i, this.statuses?.find(s => s.agent
       === i.agent))).join("\n");
+    let languageModelSection = this.renderLanguageModelIntegration(this.languageModelStatus);
     // The user may have closed the panel during the awaits
     if (SettingsPanel.current === this) {
       this.panel.webview.html = `<!DOCTYPE html>
@@ -116,6 +153,7 @@ ${renderHowTo(this.model)}
 ${branchSection}
 <h2>Integrations <button class="secondary" data-command="recheck">Re-check</button></h2>
 ${integrationRows}
+${languageModelSection}
 <script nonce="${nonce}">${script}</script>
 </body>
 </html>`;
@@ -146,7 +184,6 @@ ${integrationRows}
 
   private renderIntegration(integration: AgentIntegration, status: IntegrationStatus | undefined): string {
     let agent = integration.agent;
-    let lastError = this.services.errors.getLastError(agent);
     let skillFile = path.join(integration.getSkillDir(os.homedir()), "SKILL.md");
     let summary = status === undefined ? "Checking…" : isIntegrationAvailable(status)
       ? `<span class="ok">✔ Apparently available</span>` : `<span class="error">✘ Not available</span>`;
@@ -159,17 +196,63 @@ ${integrationRows}
       [`MCP server <code>${mcpServerName}</code> registered`, formatYesNo(status?.isMcpServerRegistered)],
       ["Skill installed", `${formatYesNo(fs.existsSync(skillFile))} <code>${escapeHtml(skillFile)}</code>`],
       ...agent === "codex" ? [["Codex VS Code extension", formatCodexExtension()]] : [],
-      ["Last error", lastError === undefined ? "none" : `<span class="error">${escapeHtml(lastError.message)}</span>`
-        + `<br><span class="dim">${escapeHtml(lastError.operation)}, `
-        + `${new Date(lastError.time).toLocaleString()}</span>`],
+      ["Last error", this.formatLastError(agent)],
     ];
     return `<div class="integration">
 <h3>${escapeHtml(integration.displayName)} — ${summary}</h3>
-<table>${rows.map(([name, value]) => `<tr><th>${name}</th><td>${value}</td></tr>`).join("\n")}</table>
+${renderTable(rows)}
 <button data-command="install" data-agent="${agent}" title="Registers the MCP server with ${integration.displayName} `
   + `(user scope) and installs the skill">Install MCP Server and Skill</button>
 <button class="secondary" data-command="uninstall" data-agent="${agent}">Uninstall</button>
 </div>`;
+  }
+
+  /**
+   * Renders the section of the VS Code Language Models integration: what it can and can't do, and
+   * its status. Nothing needs to be installed for it, so it has no Install button.
+   */
+  private renderLanguageModelIntegration(status: LanguageModelStatus | undefined): string {
+    let setting = getLanguageModelSetting();
+    let selected = status?.selected;
+    let summary = status === undefined ? "Checking…" : selected
+      ? `<span class="ok">✔ ${formatCount(status.models.length, "model")} available</span>`
+      : `<span class="error">✘ No models available</span>`;
+    let rows = [
+      ["Language Model API", status === undefined ? "…" : status.isApiAvailable
+        ? `<span class="ok">available</span> (<code>vscode.lm</code>)`
+        : `<span class="error">not available</span> in this editor`],
+      ["Models", status === undefined ? "…" : status.models.length === 0
+        ? `<span class="error">none</span>. ${escapeHtml(noLanguageModelsMessage)}`
+        : status.models.map(m => escapeHtml(`${m.name} (${m.vendor})`)).join(", ")],
+      ["Selected model", (selected
+        ? `${escapeHtml(selected.name)} <code>${escapeHtml(getModelPreference(selected))}</code>` : "none")
+        + `<br><span class="dim">Setting <code>branchReviewStudio.languageModel</code>: ${setting
+          ? `<code>${escapeHtml(setting)}</code>` : "not set, so the first available model is used"}</span>`],
+      ["Permission granted", status === undefined ? "…" : selected === undefined ? "(no model)"
+        : status.canSendRequest === undefined ? "not asked yet (VS Code asks when Ask Agent first uses the model)"
+          : formatYesNo(status.canSendRequest)],
+      ["Last error", this.formatLastError("languageModel")],
+    ];
+    return `<div class="integration">
+<h3>${languageModelDisplayName} — ${summary}</h3>
+<p>Models that VS Code provides can answer comment threads (<b>Ask Agent</b>), reading this repo's code with
+  read-only tools: read, search and list files, and see the branch's diff. They <b>can't</b> run branch reviews (the
+  review skill needs Claude Code or Codex), edit files, run commands, or fork review sessions (each answer is a
+  new conversation, without a session, that gets the thread's earlier messages). They don't use your Claude Code
+  or ChatGPT subscription: the models come from GitHub Copilot, from API keys you add with <b>Manage Models</b> in
+  the Chat view's model picker, or from other extensions.</p>
+${renderTable(rows)}
+<button data-command="chooseModel">Choose Model…</button>
+<button class="secondary" data-command="recheck">Re-check</button>
+</div>`;
+  }
+
+  /** Formats the last error of an integration, with its operation and time. */
+  private formatLastError(integration: IntegrationId): string {
+    let lastError = this.services.errors.getLastError(integration);
+    return lastError === undefined ? "none" : `<span class="error">${escapeHtml(lastError.message)}</span>`
+      + `<br><span class="dim">${escapeHtml(lastError.operation)}, `
+      + `${new Date(lastError.time).toLocaleString()}</span>`;
   }
 }
 
@@ -191,11 +274,11 @@ function renderHowTo(model: BranchReviewModel | undefined): string {
   The skill reviews in a single context; add "be thorough" (or <code>--thorough</code>) for a review by
   parallel sub-agents, which costs several times as many tokens. If the repo has its own review command
   that posts to Branch Review Studio (e.g. Barreleye's <code>/branch-review</code>), you can use that
-  instead.</li>
+  instead. Reviews need Claude Code or Codex: VS Code language models can only answer threads.</li>
 <li><b>Then:</b> the agent's findings appear as comment threads in the Branch Review view as it posts them, and
   if it posts groups of related changes, the view lists the files under their groups. Answer with <b>Reply</b>, or
-  with <b>Ask Agent</b> to send your message to a fork of the reviewing session (with the same agent) or to a fresh
-  session.</li>
+  with <b>Ask Agent</b> to send your message to a fork of the reviewing session (with the same agent), to a fresh
+  session, or to a VS Code language model (answers only, with read-only access to the repo).</li>
 </ol>`;
 }
 
@@ -203,6 +286,18 @@ function renderHowTo(model: BranchReviewModel | undefined): string {
 async function getBaseBranchOptions(model: BranchReviewModel): Promise<string[]> {
   return getBaseBranchChoices(await listBranches(model.repoRoot).catch(() => []), model.baseBranch,
     model.snapshot.branch);
+}
+
+/** Renders a two-column table of rows' names and values (HTML). */
+function renderTable(rows: string[][]): string {
+  return `<table>${rows.map(([name, value]) => `<tr><th>${name}</th><td>${value}</td></tr>`).join("\n")}</table>`;
+}
+
+/** Gets what the language model section shows, as a string, to detect changes. */
+function getLanguageModelState(status: LanguageModelStatus | undefined): string {
+  return JSON.stringify(status && [getLanguageModelSetting(), status.isApiAvailable,
+    status.models.map(getModelPreference), status.selected && getModelPreference(status.selected),
+    status.canSendRequest]);
 }
 
 /** Describes the Codex VS Code extension's installation for the Codex integration's section. */

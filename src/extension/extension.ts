@@ -11,6 +11,7 @@ import { changeBaseBranch } from "./change-base-branch";
 import { ReviewCommentController } from "./comments";
 import { fetchBase, openAllChanges, openFileDiff, openGroupChanges, openThread } from "./diff-commands";
 import { installMcpServer, installSkill, uninstall, updateInstalledServerIfOutdated } from "./install";
+import { chooseLanguageModel } from "./language-models";
 import { BranchReviewModel } from "./model";
 import { ReviewTreeNode, ReviewTreeProvider } from "./review-tree";
 import { SettingsPanel } from "./settings-panel";
@@ -19,6 +20,7 @@ import { switchBranch } from "./switch-branch";
 /** What `activate` returns; scripts/smoke-test.ts uses it to inspect the extension's state. */
 export interface BranchReviewStudioExports {
   model: BranchReviewModel | undefined;
+  getSettingsPanelHtml: () => string | undefined;
 }
 
 /**
@@ -47,7 +49,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Branch
     await watchForChanges(context, model);
     await model.refresh();
   }
-  return { model };
+  return { model, getSettingsPanelHtml: SettingsPanel.getHtmlIfOpen };
 }
 
 export function deactivate(): void {}
@@ -70,6 +72,7 @@ function registerRepoIndependentCommands(services: AgentServices, model: BranchR
     vscode.commands.registerCommand("branchReviewStudio.installMcpServer", () => installMcpServer(services)),
     vscode.commands.registerCommand("branchReviewStudio.installSkill", () => installSkill(services.context)),
     vscode.commands.registerCommand("branchReviewStudio.uninstall", () => uninstall(services)),
+    vscode.commands.registerCommand("branchReviewStudio.chooseLanguageModel", chooseLanguageModel),
     vscode.commands.registerCommand("branchReviewStudio.openSettings", () => SettingsPanel.show(model, services)));
 }
 

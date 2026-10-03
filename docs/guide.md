@@ -29,7 +29,10 @@ rather than humans.
 - **Ask Agent** (next to **Reply** in a thread) saves your message and sends it, with the thread's
   context, to an agent: by default as a fork of the session that wrote the review, with the agent
   that ran it (`claude --resume <id> --fork-session` or `codex fork <id>`, which reuses its prompt
-  cache), or as a fresh session of either agent; in a terminal or in the background.
+  cache), or as a fresh session of either agent; in a terminal or in the background. It can also
+  send the message to a VS Code language model (e.g. from GitHub Copilot), which answers with
+  read-only access to the repo but can't review branches or edit files (see "VS Code language
+  models" below).
 - The **Settings and Integrations** button (gear) in the view's title bar opens the Branch Review
   Studio panel: how to start a review, the base branch, and the status of each integration.
 
@@ -71,7 +74,8 @@ The Branch Review Studio panel (gear button) shows these steps too.
    (`/branch-review-studio` in Claude Code, `$branch-review-studio` in Codex) or paste the review
    prompt that the panel's **Copy Review Prompt** button copies: "Use the branch-review-studio
    skill to review branch `feature/x` against `develop`. If you don't have that skill, call
-   review_begin (`branch-review-studio` MCP tools) and follow its instructions." The skill reviews in a
+   review_begin (`branch-review-studio` MCP tools) and follow its instructions." Reviews need
+   Claude Code or Codex: VS Code language models can only answer threads. The skill reviews in a
    single context; add "be thorough" (or `--thorough`) for a review by parallel sub-agents, which
    costs several times as many tokens.
    If the repo has its own review command that posts to Branch Review Studio (e.g. Barreleye's
@@ -108,8 +112,10 @@ branches or stashes.
    send it to an agent. Ask Agent lists, default first (Enter picks it), grouped by agent if both
    CLIs are installed: fork the review session in a terminal, fork it in the background (only
    with the agent that ran the review session, since neither agent can fork the other's
-   sessions), then a fresh session in a terminal or in the background, for each agent. A fresh
-   session gets the review summary and merge-base in its prompt.
+   sessions), then a fresh session in a terminal or in the background, for each agent, and last,
+   if one is available, a VS Code language model ("Answers only, read-only, no session"; see "VS
+   Code language models" below). A fresh session gets the review summary and merge-base in its
+   prompt.
    - A terminal runs the agent interactively (`claude` or `codex`) in the review session's folder.
    - A background run (`claude -p`, or `codex exec --json`) shows a status bar item, logs to the
      "Branch Review Studio" output channel, and if the agent doesn't answer with `review_reply`,
@@ -144,7 +150,45 @@ Settings: `branchReviewStudio.baseBranch` (default `develop`),
 worktree), `branchReviewStudio.openWorktreeInNewWindow` (default false),
 `branchReviewStudio.claudePath` (default: `claude.exe`/`claude` on PATH, then `~/.local/bin`),
 `branchReviewStudio.codexPath` (default: the Codex CLI bundled with the Codex VS Code extension
-`openai.chatgpt` if installed, since it is usually newer than the one on PATH, else `codex` on PATH).
+`openai.chatgpt` if installed, since it is usually newer than the one on PATH, else `codex` on PATH),
+`branchReviewStudio.languageModel` (default: the first available VS Code language model; see below).
+
+## VS Code language models
+
+Besides Claude Code and Codex, **Ask Agent** can send a thread message to a language model that VS
+Code provides through its Language Model API (`vscode.lm`). The models come from GitHub Copilot
+(GitHub Copilot Chat, signed in), from API keys you add with **Manage Models** in the Chat view's
+model picker, or from other extensions that provide models. A Claude Code or ChatGPT subscription
+can't back them, so this integration doesn't use those subscriptions.
+
+- **What it can do:** answer comment threads. The prompt contains the review summary, the
+  thread's file and lines, the current lines around them, the diff hunks near them, the earlier
+  messages and your new message. The model can then call read-only tools that the extension
+  implements: `read_file` (path, optional line range), `search_text` (`git grep -E` over tracked
+  and untracked files, optional pathspec glob), `list_files` (`git ls-files`), `list_changed_files`
+  and `get_file_diff` (vs. the merge-base). The tools refuse absolute paths, paths outside the repo
+  (including symbolic links that lead outside it), paths in `.git`, and files that git ignores
+  (e.g. `.env` files listed in `.gitignore`; tracked files are readable even if they match
+  `.gitignore`). A tool's git command is stopped after 20 seconds, and when you cancel the answer.
+  Each result is truncated to 20,000 characters, with a note that says how to narrow the request,
+  and results are truncated further when the conversation nears the model's input limit
+  (estimated from its maximum input tokens). After 12 rounds of tool calls, or when the
+  conversation nears that limit, the model is told to answer with what it has.
+- **What it can't do:** run branch reviews (the review skill needs Claude Code or Codex and their
+  MCP tools), edit files or run commands (there are no write tools), or fork review sessions: each
+  answer is a new conversation without a session, so a follow-up question gets only the thread's
+  earlier messages in its prompt.
+- **Answers:** run in the background with a progress notification that shows each tool call and
+  has a **Cancel** button. The answer is posted to the thread as a comment by the model, e.g.
+  "GPT-5 (VS Code LM)". If the request fails, nothing is posted; the error is shown and recorded
+  as the integration's last error (cancelling isn't an error).
+- **Choosing the model:** **Choose Model…** in the panel, or the command **Branch Review Studio:
+  Choose Language Model…**, lists the available models (name, vendor, family, maximum input
+  tokens) and saves your choice in the user setting `branchReviewStudio.languageModel` as
+  `vendor/id`. You can also set it by hand to a model's id, family or name. Without the setting,
+  or if it names no available model, Ask Agent uses the first available model.
+- **Permission:** the first request asks you, in a VS Code dialog, whether Branch Review Studio
+  may use the model. If you decline, Ask Agent's request fails with an error that says so.
 
 ## Groups of related changes
 
@@ -196,7 +240,7 @@ dialogs, so it is a webview tab.) It shows:
 - How to run a review connected to the extension, with a **Copy Review Prompt** button.
 - The branch, its base branch (with a selector and **Change Base Branch**, which works like the
   command of that name) and the merge-base.
-- One section per integration (Claude Code, Codex): the CLI's path and version, whether you are
+- One section per CLI integration (Claude Code, Codex): the CLI's path and version, whether you are
   signed in (`claude auth status`, `codex login status`), whether the MCP server is registered
   (`claude mcp get`, `codex mcp get`), whether the skill is installed, for Codex whether the Codex
   VS Code extension is installed, and the last error from using the integration (Ask Agent
@@ -204,6 +248,11 @@ dialogs, so it is a webview tab.) It shows:
   uninstall), with its time. The last error is kept in VS Code's global extension state until the
   next successful use. **Install MCP Server and Skill** and **Uninstall** act on that agent only.
   The panel runs these checks when it opens and when you click **Re-check**.
+- A section for VS Code language models: what they can and can't do (see above), whether the
+  Language Model API is available, which models are available and which one Ask Agent uses,
+  whether VS Code has granted permission to use it, and the last error. There is nothing to
+  install, so instead of **Install** it has **Choose Model…** and **Re-check**. The section also
+  updates when the available models or the setting change.
 
 ## Files it creates
 
@@ -234,7 +283,10 @@ The extension and MCP server do not modify any tracked files in your repos. They
 - `npm run sample-review -- <repo> [--force]`: writes a sample review for the repo's current branch
 - `npm run smoke-test -- <repo>`: runs `scripts/smoke-test.ts` inside VS Code (throwaway profile)
   against a repo that has a sample review. With `BRS_SCREENSHOT_DIR=<folder>` it also saves
-  screenshots of the Extension Development Host window (Windows only). With `BRS_SMOKE_ASK_AGENT=1`
+  screenshots of the Extension Development Host window (Windows only) and the panel's HTML. It
+  checks the panel's VS Code Language Models section; with `BRS_SMOKE_LM=1` and a language model
+  available in the throwaway profile (usually none is), it also runs Ask Agent with that model,
+  which spends tokens. With `BRS_SMOKE_ASK_AGENT=1`
   it also runs Ask Agent twice (fork in the background and in a terminal), which spends tokens.
   With `BRS_SMOKE_CODEX=1` it runs Ask Agent with Codex twice (a fresh background session that
   calls `review_begin`, then a background fork of it), which also spends tokens, and then removes

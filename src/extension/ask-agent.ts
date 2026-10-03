@@ -1,28 +1,26 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as vscode from "vscode";
-import { AgentChoice, buildThreadPrompt, getAgentChoices } from "../core/agent-commands";
+import { getAgentChoiceItems, getAgentIntegration } from "../core/agent-choice-items";
+import { buildLanguageModelPrompt, buildThreadPrompt, ThreadMessageContext } from "../core/agent-commands";
 import { AgentCommand, AgentIntegration } from "../core/agent-integration";
 import { getErrorMessage } from "../core/files";
-import { AgentKind, findLatestSession, Review, ReviewSession } from "../core/review";
+import { answerThreadWithModel } from "../core/language-model";
+import { RepoTools } from "../core/repo-tools";
+import { AgentKind, findLatestSession, Review, ReviewSession, ReviewThread } from "../core/review";
 import { answerThreadInBackground, BackgroundAnswerRequest, recordFollowupSession } from "../core/thread-answer";
 import {
-  agentIntegrations, AgentServices, codexExtensionId, findAgentCommand, getAgentIntegration, getBundledServerPath,
-  openCodexThread,
+  agentIntegrations, AgentServices, codexExtensionId, findAgentCommand, getBundledServerPath, openCodexThread,
 } from "./agents";
 import { ReviewCommentController } from "./comments";
+import { createToolCallingModel, describeLanguageModelError, findLanguageModel } from "./language-models";
 import { BranchReviewModel } from "./model";
-
-/** An item of Ask Agent's QuickPick: which agent should answer, and how. */
-interface AgentChoiceItem extends vscode.QuickPickItem {
-  choice?: AgentChoice;
-}
 
 /**
  * Saves the user's message in a thread and sends it, with the thread's context, to an agent
  * (Claude Code or Codex): either as a fork of the session that wrote the review (which reuses its
  * prompt cache), with the agent that ran that session, or as a fresh session, in a terminal or in
- * the background.
+ * the background. Alternatively, a VS Code language model answers it (see answerWithLanguageModel).
  */
 export async function askAgent(model: BranchReviewModel, comments: ReviewCommentController,
   reply: vscode.CommentReply, services: AgentServices): Promise<void> {
@@ -31,30 +29,35 @@ export async function askAgent(model: BranchReviewModel, comments: ReviewComment
     let command = findAgentCommand(i);
     return command ? [[i.agent, command] as const] : [];
   }));
+  let languageModel = await findLanguageModel();
   if (reply.text.trim() === "") {
     void vscode.window.showErrorMessage("Type a message for the agent first.");
-  } else if (commands.size === 0) {
-    void vscode.window.showErrorMessage("Could not find the Claude Code CLI (claude) or the Codex CLI (codex). "
-      + "Install one, or set the branchReviewStudio.claudePath or branchReviewStudio.codexPath setting.");
+  } else if (commands.size === 0 && languageModel === undefined) {
+    void vscode.window.showErrorMessage("Could not find the Claude Code CLI (claude), the Codex CLI (codex) or a VS "
+      + "Code language model. Install a CLI (or set the branchReviewStudio.claudePath or branchReviewStudio.codexPath "
+      + "setting), or make a language model available, e.g. with GitHub Copilot.");
   } else {
     let reviewSession = review && findSessionToFork(review, comments.getThreadId(reply.thread));
     // `claude --resume` finds a session only in the folder it ran in
     let forkableSession = reviewSession && fs.existsSync(reviewSession.cwd) && commands.has(reviewSession.agent)
       ? reviewSession : undefined;
-    let item = await vscode.window.showQuickPick(getAgentChoiceItems([...commands.keys()], forkableSession),
+    let items = getAgentChoiceItems([...commands.keys()], forkableSession, languageModel?.name)
+      .map(i => i.isSeparator ? { ...i, kind: vscode.QuickPickItemKind.Separator } : i);
+    let item = await vscode.window.showQuickPick(items,
       { placeHolder: getPlaceHolder(reviewSession, forkableSession, commands) });
     let threadId = item?.choice && await comments.saveMessage(reply);
     let { review: savedReview, branch } = model.snapshot;
     let thread = savedReview?.threads.find(t => t.id === threadId);
     let choice = item?.choice;
-    let command = choice && commands.get(choice.agent);
-    if (choice && command && thread && savedReview && branch) {
+    let command = choice && choice.agent !== "languageModel" ? commands.get(choice.agent) : undefined;
+    let context = thread && savedReview && await getMessageContext(model, savedReview, thread);
+    if (choice?.agent === "languageModel" && languageModel && context) {
+      await answerWithLanguageModel(model, services, languageModel, context);
+    } else if (choice && choice.agent !== "languageModel" && command && thread && context && branch) {
       let integration = getAgentIntegration(choice.agent);
       let cwd = choice.sessionMode === "fork" && forkableSession ? forkableSession.cwd : model.repoRoot;
-      let location = model.snapshot.threadLocations.get(thread.id) ?? { ...thread.anchor, isOutdated: false };
-      let threadTitle = `${thread.file.split("/").pop()}:${location.startLine}`;
-      let prompt = buildThreadPrompt({ review: savedReview, thread,
-        fileLines: await model.getFileLines(thread.file, thread.side), location }, choice.sessionMode);
+      let threadTitle = getThreadTitle(context);
+      let prompt = buildThreadPrompt(context, choice.sessionMode);
       let newSessionId = integration.canPreassignSessionId ? randomUUID() : undefined;
       let where = choice.runMode === "interactive" ? "terminal" : "background";
       let operation = `Ask Agent (${choice.sessionMode}, ${where})`;
@@ -80,27 +83,6 @@ export async function askAgent(model: BranchReviewModel, comments: ReviewComment
       }
     }
   }
-}
-
-/**
- * Builds the QuickPick items for the ways to send the message (see getAgentChoices), default first,
- * with a separator per agent if there are several agents.
- */
-function getAgentChoiceItems(availableAgents: AgentKind[], forkableSession: ReviewSession | undefined)
-  : AgentChoiceItem[] {
-  let items: AgentChoiceItem[] = [];
-  for (let choice of getAgentChoices(availableAgents, forkableSession?.agent)) {
-    let integration = getAgentIntegration(choice.agent);
-    if (availableAgents.length > 1 && items.at(-1)?.choice?.agent !== choice.agent)
-      items.push({ label: integration.displayName, kind: vscode.QuickPickItemKind.Separator });
-    let isFork = choice.sessionMode === "fork";
-    let where = choice.runMode === "interactive" ? "interactive terminal" : "background";
-    items.push({ choice, label: `${isFork ? "$(repo-forked) Fork review session" : "$(add) Fresh session"}, ${where}`,
-      description: isFork ? `forks session ${forkableSession?.sessionId.slice(0, 8)}` : undefined,
-      detail: choice.runMode === "background"
-        ? `Runs ${integration.backgroundCommand}; the answer appears in the thread` : undefined });
-  }
-  return items;
 }
 
 /** Gets the QuickPick's prompt, explaining why the review session can't be forked if it can't. */
@@ -181,4 +163,62 @@ async function answerInBackground(model: BranchReviewModel, services: AgentServi
   } finally {
     statusItem.dispose();
   }
+}
+
+/**
+ * Answers a thread with a VS Code language model, which may read the repo with read-only tools
+ * (see RepoTools and answerThreadWithModel), while a cancellable progress notification names each
+ * tool call. Records the outcome as a success or an error of the language model integration;
+ * cancelling isn't an error.
+ */
+async function answerWithLanguageModel(model: BranchReviewModel, services: AgentServices,
+  chat: vscode.LanguageModelChat, context: ThreadMessageContext): Promise<void> {
+  let { review, thread, location } = context;
+  let threadTitle = getThreadTitle(context);
+  let cancellation = new AbortController();
+  let tools = new RepoTools(model.repoRoot, model.snapshot.mergeBase?.mergeBaseSha ?? review.mergeBaseSha,
+    { signal: cancellation.signal });
+  let nearbyDiff = await tools.getDiffNear(thread.file, thread.side, location.startLine, location.endLine)
+    .catch(() => undefined);
+  services.log.appendLine(`Asking ${chat.name} (${chat.vendor}/${chat.id}) about thread ${thread.id}`);
+  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, cancellable: true,
+    title: `${chat.name} is answering the thread on ${threadTitle}` }, async (progress, token) => {
+    let subscription = token.onCancellationRequested(() => cancellation.abort());
+    try {
+      await answerThreadWithModel({ store: model.store, branch: review.branch, threadId: thread.id,
+        model: createToolCallingModel(chat, token), prompt: buildLanguageModelPrompt(context, nearbyDiff), tools,
+        onToolCall: call => {
+          let callText = `${call.name} ${JSON.stringify(call.input)}`;
+          progress.report({ message: callText.slice(0, 100) });
+          services.log.appendLine(`  ${callText}`);
+        } });
+      await services.errors.recordSuccess("languageModel");
+      await model.refresh();
+      void vscode.window.showInformationMessage(`${chat.name} answered the thread on ${threadTitle}.`, "Show Thread")
+        .then(button => button && vscode.commands.executeCommand("branchReviewStudio.openThread", thread.id));
+    } catch (e) {
+      if (token.isCancellationRequested) {
+        services.log.appendLine(`Cancelled asking ${chat.name}.`);
+      } else {
+        let message = describeLanguageModelError(e);
+        services.log.appendLine(`${chat.name} failed: ${message}`);
+        void vscode.window.showErrorMessage(`${chat.name} failed to answer the thread on ${threadTitle}: ${message}`);
+        await services.errors.recordError("languageModel", "Ask Agent (language model)", message);
+      }
+    } finally {
+      subscription.dispose();
+    }
+  });
+}
+
+/** Gets what the prompts need to know about a thread whose last comment is the user's new message. */
+async function getMessageContext(model: BranchReviewModel, review: Review, thread: ReviewThread)
+  : Promise<ThreadMessageContext> {
+  let location = model.snapshot.threadLocations.get(thread.id) ?? { ...thread.anchor, isOutdated: false };
+  return { review, thread, fileLines: await model.getFileLines(thread.file, thread.side), location };
+}
+
+/** Gets a short name of a thread for messages, e.g. "model.ts:42". */
+function getThreadTitle({ thread, location }: ThreadMessageContext): string {
+  return `${thread.file.split("/").pop()}:${location.startLine}`;
 }

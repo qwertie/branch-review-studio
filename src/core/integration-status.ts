@@ -1,6 +1,6 @@
 import { AgentCommand, AgentIntegration } from "./agent-integration";
 import { getErrorMessage } from "./files";
-import { AgentKind } from "./review";
+import { AgentKind, IntegrationId } from "./review";
 
 /** What checkIntegrationStatus found out about one agent integration. */
 export interface IntegrationStatus {
@@ -70,8 +70,8 @@ export interface KeyValueStorage {
 }
 
 /**
- * Remembers, in persistent storage, the last error that occurred while using each agent
- * integration, until the next successful use of that integration.
+ * Remembers, in persistent storage, the last error that occurred while using each integration
+ * (an agent CLI, or VS Code's language models), until the next successful use of that integration.
  */
 export class IntegrationErrorLog {
   private static readonly storageKey = "branchReviewStudio.integrationErrors";
@@ -79,26 +79,27 @@ export class IntegrationErrorLog {
   /** `onDidChange` is called after every change */
   constructor(private readonly storage: KeyValueStorage, private readonly onDidChange: () => void = () => {}) {}
 
-  getLastError(agent: AgentKind): IntegrationError | undefined {
-    return this.getErrors()[agent];
+  getLastError(integration: IntegrationId): IntegrationError | undefined {
+    return this.getErrors()[integration];
   }
 
-  async recordError(agent: AgentKind, operation: string, message: string, time = new Date()): Promise<void> {
-    await this.saveErrors({ ...this.getErrors(), [agent]: { operation, message, time: time.toISOString() } });
+  async recordError(integration: IntegrationId, operation: string, message: string, time = new Date())
+    : Promise<void> {
+    await this.saveErrors({ ...this.getErrors(), [integration]: { operation, message, time: time.toISOString() } });
   }
 
-  /** Forgets the agent's last error, if any. */
-  async recordSuccess(agent: AgentKind): Promise<void> {
-    let { [agent]: lastError, ...otherErrors } = this.getErrors();
+  /** Forgets the integration's last error, if any. */
+  async recordSuccess(integration: IntegrationId): Promise<void> {
+    let { [integration]: lastError, ...otherErrors } = this.getErrors();
     if (lastError)
       await this.saveErrors(otherErrors);
   }
 
-  private getErrors(): Partial<Record<AgentKind, IntegrationError>> {
+  private getErrors(): Partial<Record<IntegrationId, IntegrationError>> {
     return this.storage.get(IntegrationErrorLog.storageKey) ?? {};
   }
 
-  private async saveErrors(errors: Partial<Record<AgentKind, IntegrationError>>): Promise<void> {
+  private async saveErrors(errors: Partial<Record<IntegrationId, IntegrationError>>): Promise<void> {
     await this.storage.update(IntegrationErrorLog.storageKey, errors);
     this.onDidChange();
   }

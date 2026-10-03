@@ -10,7 +10,7 @@ import * as vscode from "vscode";
 import { AgentRunMode, AgentSessionMode, getAgentChoices } from "../src/core/agent-commands";
 import { ChangedFile, getBaseBranchChoices, getFileAtRevision, listBranches, MergeBaseInfo } from "../src/core/git";
 import { applyHunks, DiffHunk, readDiffHunks } from "../src/core/hunks";
-import { AgentKind, createReview, findLatestSession } from "../src/core/review";
+import { createReview, findLatestSession, formatCount, IntegrationId } from "../src/core/review";
 import { ReviewStore } from "../src/core/store";
 import type { BranchReviewStudioExports } from "../src/extension/extension";
 import { ReviewTools } from "../src/mcp/review-tools";
@@ -28,7 +28,8 @@ export async function run(): Promise<void> {
   };
 
   let extension = vscode.extensions.getExtension<BranchReviewStudioExports>("qwertie.branch-review-studio");
-  let model = (await extension?.activate())?.model;
+  let exports = await extension?.activate();
+  let model = exports?.model;
   await check("activates and finds the repo", () => assert.ok(model, "model is undefined"));
   if (model && process.env.BRS_SMOKE_FRESH_REPO) {
     await check("creates the review folder lazily; the watcher sees a review written by another process",
@@ -156,6 +157,19 @@ export async function run(): Promise<void> {
       await vscode.commands.executeCommand("workbench.action.zoomReset");
     }
   });
+  await check("the panel's VS Code Language Models section states its limits and shows the models", async () => {
+    let models = await vscode.lm.selectChatModels();
+    console.log(`INFO language models: ${JSON.stringify(models.map(m => [m.vendor, m.id, m.name, m.maxInputTokens]))}`);
+    let html = exports?.getSettingsPanelHtml() ?? "";
+    if (process.env.BRS_SCREENSHOT_DIR)
+      fs.writeFileSync(path.join(process.env.BRS_SCREENSHOT_DIR, "settings-panel.html"), html);
+    for (let text of ["VS Code Language Models", "<b>can't</b> run branch reviews", "Choose Model…",
+      "Reviews need Claude Code or Codex", models.length === 0 ? "No models available"
+        : `${formatCount(models.length, "model")} available`])
+      assert.ok(html.includes(text), `the panel lacks "${text}"`);
+  });
+  if (model && process.env.BRS_SMOKE_LM)
+    await checkLanguageModelAnswer(model, check);
   if (model && process.env.BRS_SCREENSHOT_DIR)
     await captureScreenshots(model, process.env.BRS_SCREENSHOT_DIR);
   console.log(failures === 0 ? "SMOKE TEST PASSED" : `SMOKE TEST FAILED (${failures})`);
@@ -204,6 +218,24 @@ async function checkCodex(model: Model, check: (name: string, action: () => Prom
   await model.modifyReview(review => {
     review.threads = review.threads.filter(t => !addedThreadIds.includes(t.id));
     review.sessions = review.sessions.filter(s => originalSessionIds.has(s.sessionId));
+  });
+}
+
+/**
+ * Runs Ask Agent with a VS Code language model (the last QuickPick item), which spends tokens and
+ * may show VS Code's permission prompt, then removes the thread that it added.
+ */
+async function checkLanguageModelAnswer(model: Model,
+  check: (name: string, action: () => Promise<void>) => Promise<void>) {
+  await check("Ask Agent (VS Code language model) posts the model's answer", async () => {
+    assert.ok((await vscode.lm.selectChatModels()).length > 0, "no language models are available");
+    let added = await askAgentOnNewThread(model, getChoiceIndex(model, "languageModel", "fresh", "background"),
+      "Smoke test: in one short sentence, what is this line about?");
+    console.log(`INFO thread comments: ${JSON.stringify(added.comments.map(c => [c.author.name, c.body]))}`);
+    await model.modifyReview(review => {
+      review.threads = review.threads.filter(t => t.id !== added.id);
+    });
+    assert.ok(added.comments.at(-1)?.author.name.endsWith("(VS Code LM)"), "no answer from the model");
   });
 }
 
@@ -270,9 +302,9 @@ async function checkGroups(model: Model) {
 }
 
 /** Gets the index of an Ask Agent QuickPick item for a new thread, if both agents are found. */
-function getChoiceIndex(model: Model, agent: AgentKind, sessionMode: AgentSessionMode, runMode: AgentRunMode) {
+function getChoiceIndex(model: Model, agent: IntegrationId, sessionMode: AgentSessionMode, runMode: AgentRunMode) {
   let forkableAgent = findLatestSession(model.snapshot.review!, "review")?.agent;
-  return getAgentChoices(["claude", "codex"], forkableAgent)
+  return getAgentChoices(["claude", "codex"], forkableAgent, true)
     .findIndex(c => c.agent === agent && c.sessionMode === sessionMode && c.runMode === runMode);
 }
 

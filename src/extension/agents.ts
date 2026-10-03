@@ -4,7 +4,6 @@ import { AgentCommand, AgentIntegration, getSearchOptionsForProcess } from "../c
 import { claudeIntegration } from "../core/claude-cli";
 import { codexIntegration, findCodexExtensionExecutables } from "../core/codex-cli";
 import { IntegrationErrorLog } from "../core/integration-status";
-import { AgentKind } from "../core/review";
 
 /** The agent integrations, in the order in which the UI lists them. */
 export const agentIntegrations: AgentIntegration[] = [claudeIntegration, codexIntegration];
@@ -18,11 +17,6 @@ export interface AgentServices {
   log: vscode.OutputChannel;
   /** Last error of each integration, which the settings panel shows */
   errors: IntegrationErrorLog;
-}
-
-/** Gets the integration that runs the given agent. */
-export function getAgentIntegration(agent: AgentKind): AgentIntegration {
-  return agent === "claude" ? claudeIntegration : codexIntegration;
 }
 
 /**

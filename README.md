@@ -13,11 +13,13 @@ people.
   changes.
 - **Conversations:** reply in a thread, or use **Ask Agent** to send your message to a fork of
   the session that wrote the review, or to a fresh session, so the answer lands back in the
-  thread.
+  thread. Ask Agent can also use a VS Code language model (from GitHub Copilot, your own API key,
+  or another extension), which answers with read-only access to the repo; it can't run reviews or
+  edit files, and it doesn't use your Claude Code or ChatGPT subscription.
 - **Branch switching:** pick a branch; the extension opens its worktree, creating one if needed.
 
 It's per-user and doesn't modify tracked files in your repos, so teammates who don't use it aren't
-affected. You need the `claude` and/or `codex` CLI, and `node` on your PATH.
+affected. For reviews, you need the `claude` and/or `codex` CLI, and `node` on your PATH.
 
 ## Getting started
 

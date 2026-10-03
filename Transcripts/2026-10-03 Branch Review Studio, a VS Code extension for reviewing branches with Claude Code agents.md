@@ -303,3 +303,29 @@ flowchart LR
   Left --> View[group G's diff view]
   Right --> View
 ```
+
+## S8. Follow-up: publishing, VS Code Language Models
+
+### User
+
+> I added a repo at https://github.com/qwertie/branch-review-studio.git and I'd like you to push to
+> it with a brief readme and some kind of public domain dedication. How do we get this thing onto
+> the Database of extensions in Visual Studio Code?
+
+Answers: publish everything with full history; Unlicense; publisher `qwertie`. "the dedication
+should mention it was initially built by Opus 5.5"; "but don't actually put it on the marketplace
+until I've reviewed it more". Later: "Yes use readme to avoid NOASSERTION. Oh also I've updated
+AGENTS.md, please commit that."
+
+> How hard would it be to add an integration for the new VS Code "Language Models" feature?
+
+The assistant proposed P1 (answers only), P2 (answers with read-only tools) and P3 (full branch
+reviews, not recommended).
+
+> OK do P2 and Ensure that the UI Indicates the ability and limitation of this integration (That
+> it can't do full branch reviews)
+
+Assumptions made without asking: background-only; read-only tools confined to the repo that refuse
+`.git`, paths outside the repo, special files and gitignored files; 12 tool rounds, 20,000-character
+results, an input budget of 80% of the model's limit; 20-second git timeouts; failures post
+nothing and are shown as the integration's last error.

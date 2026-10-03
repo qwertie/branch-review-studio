@@ -102,6 +102,11 @@ export interface ReviewSession {
 export type SessionRole = "review" | "followup";
 /** The agents that Branch Review Studio can run: Claude Code and OpenAI Codex. */
 export type AgentKind = "claude" | "codex";
+/**
+ * Something that can answer threads: an agent CLI, or 'languageModel' = a model from VS Code's
+ * Language Model API (see language-model.ts), which can't review branches or hold sessions.
+ */
+export type IntegrationId = AgentKind | "languageModel";
 /** Severities that an agent can give a finding, most severe first. */
 export const severities = ["Critical", "Major", "Minor", "Note"] as const;
 export type Severity = typeof severities[number];
