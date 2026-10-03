@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { getFullPath } from "../core/files";
 import { getFileAtRevision } from "../core/git";
 import { buildGroupViewText } from "../core/groups";
+import { getGroupHeading } from "../core/review-outline";
 import { BranchReviewModel } from "./model";
 
 /** URI scheme of read-only documents that show a file's content at the merge-base. */
@@ -12,6 +13,11 @@ export const baseScheme = "brs-base";
  * since their line numbers are not merge-base line numbers.
  */
 export const groupViewScheme = "brs-group";
+/**
+ * URI scheme of read-only markdown documents that introduce a group in Open All Changes (see
+ * getGroupHeading).
+ */
+export const headingScheme = "brs-heading";
 
 /**
  * Gets the URI of `file` (repo-relative) at commit `sha`. An empty `sha` gives an empty document,
@@ -36,6 +42,25 @@ export function getGroupViewUri(repoRoot: string, file: string, groupId: string)
   return vscode.Uri.file(getFullPath(repoRoot, file)).with({ scheme: groupViewScheme, query });
 }
 
+/**
+ * Gets the URI of the heading document of a group (undefined `groupId`: Ungrouped). Its path is the
+ * document's file name, which the multi-diff editor shows as the entry's title.
+ */
+export function getHeadingUri(fileName: string, groupId: string | undefined): vscode.Uri {
+  let query = groupId === undefined ? "" : new URLSearchParams({ group: groupId }).toString();
+  return vscode.Uri.from({ scheme: headingScheme, path: fileName, query });
+}
+
+/**
+ * Gets the repo-relative path of the review file that a document shows: a working-tree file, its
+ * merge-base version, or the left side of a group's view of it; undefined for other documents.
+ */
+export function getReviewFileOfUri(model: BranchReviewModel, uri: vscode.Uri): string | undefined {
+  let isFileInQuery = uri.scheme === baseScheme || uri.scheme === groupViewScheme;
+  return uri.scheme === "file" ? model.getRelativePath(uri.fsPath)
+    : isFileInQuery ? new URLSearchParams(uri.query).get("file") ?? undefined : undefined;
+}
+
 /** Serves the documents whose URIs getBaseUri makes. */
 export class BaseContentProvider implements vscode.TextDocumentContentProvider {
   async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
@@ -45,20 +70,37 @@ export class BaseContentProvider implements vscode.TextDocumentContentProvider {
 }
 
 /**
- * Serves the documents whose URIs getGroupViewUri makes, from the current review's groups. If the
- * merge-base changed since the groups were posted, a document shows the file at the current
- * merge-base instead. Open documents are updated whenever the model refreshes.
+ * Serves documents of one URI scheme that are computed from the model's snapshot, and updates the
+ * open ones whenever the model refreshes.
  */
-export class GroupViewContentProvider implements vscode.TextDocumentContentProvider, vscode.Disposable {
+abstract class SnapshotContentProvider implements vscode.TextDocumentContentProvider, vscode.Disposable {
   private readonly changeEmitter = new vscode.EventEmitter<vscode.Uri>();
   readonly onDidChange = this.changeEmitter.event;
   private readonly subscription: vscode.Disposable;
 
-  constructor(private readonly model: BranchReviewModel) {
+  constructor(protected readonly model: BranchReviewModel, scheme: string) {
     this.subscription = model.onDidChange(() => {
-      for (let document of vscode.workspace.textDocuments.filter(d => d.uri.scheme === groupViewScheme))
+      for (let document of vscode.workspace.textDocuments.filter(d => d.uri.scheme === scheme))
         this.changeEmitter.fire(document.uri);
     });
+  }
+
+  abstract provideTextDocumentContent(uri: vscode.Uri): Promise<string> | string;
+
+  dispose(): void {
+    this.subscription.dispose();
+    this.changeEmitter.dispose();
+  }
+}
+
+/**
+ * Serves the documents whose URIs getGroupViewUri makes, from the current review's groups. If the
+ * merge-base changed since the groups were posted, a document shows the file at the current
+ * merge-base instead.
+ */
+export class GroupViewContentProvider extends SnapshotContentProvider {
+  constructor(model: BranchReviewModel) {
+    super(model, groupViewScheme);
   }
 
   async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
@@ -73,9 +115,18 @@ export class GroupViewContentProvider implements vscode.TextDocumentContentProvi
     return groupedFile && review?.changeGroups?.mergeBaseSha === mergeBaseSha
       ? buildGroupViewText(baseText, groupedFile, query.get("group") ?? "") : baseText;
   }
+}
 
-  dispose(): void {
-    this.subscription.dispose();
-    this.changeEmitter.dispose();
+/** Serves the documents whose URIs getHeadingUri makes, from the current review's groups. */
+export class HeadingContentProvider extends SnapshotContentProvider {
+  constructor(model: BranchReviewModel) {
+    super(model, headingScheme);
+  }
+
+  provideTextDocumentContent(uri: vscode.Uri): string {
+    let groupId = new URLSearchParams(uri.query).get("group") ?? undefined;
+    let { outline } = this.model.snapshot;
+    let section = outline.sections.find(s => s.group && s.group.id === groupId);
+    return section ? getGroupHeading(outline, section).text : "This group is no longer in the review.\n";
   }
 }

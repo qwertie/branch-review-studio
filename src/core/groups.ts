@@ -23,7 +23,7 @@ export interface ChangeGroupsInput {
   files: FileGroupsInput[];
 }
 
-/** A group, or the Ungrouped group, as the tree shows it (see arrangeGroups). */
+/** A group, or the Ungrouped group, as the Branch Review view shows it (see arrangeGroups). */
 export interface ArrangedGroup {
   /** Undefined for the Ungrouped group */
   id: string | undefined;
@@ -46,7 +46,7 @@ export interface ArrangedFile {
   isPartial: boolean;
 }
 
-/** The groups that the tree shows, smallest first, then Ungrouped. */
+/** The groups that the Branch Review view shows, smallest first, then Ungrouped. */
 export interface GroupLayout {
   groups: ArrangedGroup[];
   /**
@@ -196,12 +196,12 @@ export function buildGroupViewText(baseText: string, groupedFile: GroupedFile, g
 }
 
 /**
- * Arranges the changed files into groups for the tree: each grouped file appears under every group
+ * Arranges the changed files into groups for the view: each grouped file appears under every group
  * whose view of it shows a hunk (see getFileGroupIds). Groups are sorted by size, smallest first
  * (ties keep the agent's order), so groups without changed files (e.g. because the changes were
  * reverted, or the agent erred) come first, where they stand out. Changed files that are in
  * no group, e.g. files changed after the groups were posted, go into a final Ungrouped group, with
- * `unchangedFiles` (files that the tree lists although they have no changes, e.g. because they have
+ * `unchangedFiles` (files that the view lists although they have no changes, e.g. because they have
  * threads).
  */
 export function arrangeGroups(changeGroups: ChangeGroups, changedFiles: string[], mergeBaseSha: string | undefined,
@@ -235,7 +235,7 @@ export function describeGroupSize(group: ArrangedGroup): string {
 }
 
 /**
- * Gets the groups under which the tree lists a file: the groups listed for it whose views show one
+ * Gets the groups under which the view lists a file: the groups listed for it whose views show one
  * or more of its hunks (their own hunks or unassigned ones), or all of them if the file has no hunks
  * (e.g. a binary file).
  */

@@ -56,6 +56,13 @@ export class ReviewCommentController implements vscode.Disposable {
     return undefined;
   }
 
+  /** Expands a review thread's widget in the editors that show it, e.g. before revealing it. */
+  expandThread(threadId: string): void {
+    let vscodeThread = this.vscodeThreads.get(threadId);
+    if (vscodeThread)
+      vscodeThread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+  }
+
   /** Gets the review thread id of a VS Code thread; undefined if it isn't saved yet. */
   getThreadId(vscodeThread: vscode.CommentThread): string | undefined {
     return this.threadIds.get(vscodeThread);
@@ -162,7 +169,7 @@ export class ReviewCommentController implements vscode.Disposable {
   }
 
   /** Gets the URI that a thread is shown on, or undefined if the base side can't be shown. */
-  private getThreadUri(thread: ReviewThread, snapshot: ReviewSnapshot): vscode.Uri | undefined {
+  getThreadUri(thread: ReviewThread, snapshot: ReviewSnapshot): vscode.Uri | undefined {
     if (thread.side === "modified")
       return vscode.Uri.file(this.model.getFullPath(thread.file));
     return snapshot.mergeBase && getBaseUri(this.model.repoRoot, snapshot.mergeBase.mergeBaseSha, thread.file);

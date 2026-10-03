@@ -6,7 +6,9 @@ import {
   ChangedFile, findMergeBase, getChangedFiles, getConfigValue, getCurrentBranch, MergeBaseInfo,
 } from "../core/git";
 import { arrangeGroups, GroupLayout } from "../core/groups";
+import { DiffHunk, readDiffHunks } from "../core/hunks";
 import { createReview, DiffSide, getBaseBranchName, Review } from "../core/review";
+import { buildReviewOutline, ReviewOutline } from "../core/review-outline";
 import { ReviewStore } from "../core/store";
 
 /** Everything the UI shows about the current branch, computed by BranchReviewModel.refresh. */
@@ -21,18 +23,25 @@ export interface ReviewSnapshot {
   /** Current location of each thread in `review`, by thread id */
   threadLocations: Map<string, AnchorLocation>;
   /**
-   * The review's groups of related changes, as the tree shows them; undefined if the review has
-   * none. Its Ungrouped group includes unchanged files that have threads.
+   * The review's groups of related changes, as the Branch Review view shows them; undefined if the
+   * review has none. Its Ungrouped group includes unchanged files that have threads.
    */
   groupLayout: GroupLayout | undefined;
+  /**
+   * The order of groups, files and threads in the Branch Review view, Open All Changes and thread
+   * navigation
+   */
+  outline: ReviewOutline;
 }
 
 const emptySnapshot: ReviewSnapshot = { branch: undefined, mergeBase: undefined, mergeBaseError: undefined,
-  changedFiles: [], review: undefined, threadLocations: new Map(), groupLayout: undefined };
+  changedFiles: [], review: undefined, threadLocations: new Map(), groupLayout: undefined,
+  outline: { sections: [], isStale: false } };
 
 /**
  * Holds the review state of one working tree (its branch, merge-base, changed files and review)
- * and recomputes it on request. The tree view and the comment controller render `snapshot`.
+ * and recomputes it on request. The Branch Review view and the comment controller render
+ * `snapshot`.
  */
 export class BranchReviewModel implements vscode.Disposable {
   private readonly changeEmitter = new vscode.EventEmitter<ReviewSnapshot>();
@@ -177,7 +186,13 @@ export class BranchReviewModel implements vscode.Disposable {
       .filter(file => !changedPaths.includes(file));
     let groupLayout = review?.changeGroups && arrangeGroups(review.changeGroups, changedPaths,
       mergeBase?.mergeBaseSha, unchangedPathsWithThreads);
-    return { branch, mergeBase, mergeBaseError, changedFiles, review, threadLocations, groupLayout };
+    let baseThreadHunks = new Map<string, DiffHunk[]>();
+    for (let file of changedFiles.filter(f => review?.threads.some(t => t.side === "base" && t.file === f.path))) {
+      baseThreadHunks.set(file.path, mergeBase
+        ? await readDiffHunks(this.repoRoot, mergeBase.mergeBaseSha, file).catch(() => []) : []);
+    }
+    let outline = buildReviewOutline({ changedFiles, review, threadLocations, groupLayout, baseThreadHunks });
+    return { branch, mergeBase, mergeBaseError, changedFiles, review, threadLocations, groupLayout, outline };
   }
 
   private getBaseBranch(review: Review | undefined): string {

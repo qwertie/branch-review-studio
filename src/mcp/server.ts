@@ -78,7 +78,7 @@ async function main(): Promise<void> {
     inputSchema: {
       groups: z.array(z.object({
         id: z.string().describe("Short id, unique among the groups, e.g. 'parser'"),
-        name: z.string().describe("Heading shown in the tree, e.g. 'Fix CSV parser quoting'"),
+        name: z.string().describe("Heading shown in the Branch Review view, e.g. 'Fix CSV parser quoting'"),
         summary: z.string().describe("Markdown: what the group's changes do"),
       })),
       files: z.array(z.object({

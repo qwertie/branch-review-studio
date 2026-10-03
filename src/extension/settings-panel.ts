@@ -5,9 +5,11 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { buildReviewPrompt, mcpServerName } from "../core/agent-commands";
 import { AgentIntegration, runAgentCommand } from "../core/agent-integration";
+import { getErrorMessage } from "../core/files";
 import { getBaseBranchChoices, listBranches } from "../core/git";
 import { checkIntegrationStatus, IntegrationStatus, isIntegrationAvailable } from "../core/integration-status";
 import { getModelPreference, languageModelDisplayName } from "../core/language-model";
+import { escapeHtml } from "../core/markdown-subset";
 import { formatCount, IntegrationId } from "../core/review";
 import { agentIntegrations, AgentServices, codexExtensionId, findAgentCommand } from "./agents";
 import { changeBaseBranchIfConfirmed } from "./change-base-branch";
@@ -46,7 +48,8 @@ export class SettingsPanel {
 
   private constructor(private readonly panel: vscode.WebviewPanel, private readonly model: BranchReviewModel
     | undefined, private readonly services: AgentServices) {
-    let subscriptions = [panel.webview.onDidReceiveMessage((message: PanelMessage) => this.handleMessage(message)),
+    let subscriptions = [panel.webview.onDidReceiveMessage((message: PanelMessage) => this.handleMessage(message)
+      .catch(e => void vscode.window.showErrorMessage(getErrorMessage(e)))),
       vscode.workspace.onDidChangeConfiguration(e => {
         if (e.affectsConfiguration("branchReviewStudio.languageModel"))
           void this.checkLanguageModels();
@@ -312,11 +315,6 @@ function formatCodexExtension(): string {
 /** Formats a check's result; undefined means that the check hasn't finished or couldn't run. */
 function formatYesNo(value: boolean | undefined): string {
   return value === undefined ? "…" : value ? `<span class="ok">yes</span>` : `<span class="error">no</span>`;
-}
-
-/** Escapes text for use in HTML content and in quoted attribute values. */
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, ch => `&#${ch.charCodeAt(0)};`);
 }
 
 /**

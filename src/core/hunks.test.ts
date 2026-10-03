@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { getChangedFiles } from "./git";
-import { applyHunks, parseDiffHunks, readDiffHunks } from "./hunks";
+import { applyHunks, mapBaseLineToWorkingTree, parseDiffHunks, readDiffHunks } from "./hunks";
 import { TempRepo } from "./test-helpers";
 
 let repos: TempRepo[] = [];
@@ -22,6 +22,20 @@ describe("parseDiffHunks", () => {
       { oldStart: 9, oldCount: 0, newStart: 8, newCount: 3 },
     ]);
   });
+});
+
+describe("mapBaseLineToWorkingTree", () => {
+  it("shifts lines after hunks and puts removed or changed lines, in order, before the hunk's new lines",
+    () => {
+      // Base lines 3-4 became three lines; two lines were inserted after base line 5; base line 10
+      // was removed after working-tree line 12
+      let lines = (count: number) => Array<string>(count).fill("x\n");
+      let hunks = [{ oldStart: 3, oldCount: 2, newStart: 3, newLines: lines(3) },
+        { oldStart: 5, oldCount: 0, newStart: 7, newLines: lines(2) },
+        { oldStart: 10, oldCount: 1, newStart: 12, newLines: [] }];
+      expect([1, 3, 4, 5, 6, 9, 10, 11].map(line => mapBaseLineToWorkingTree(hunks, line)))
+        .toEqual([1, 2 + 1 / 3, 2 + 2 / 3, 6, 9, 12, 12.5, 13]);
+    });
 });
 
 describe("applyHunks", () => {

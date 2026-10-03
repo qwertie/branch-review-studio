@@ -1,4 +1,5 @@
 node_modules/
+media/codicons/
 dist/
 out/
 *.vsix

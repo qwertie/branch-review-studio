@@ -329,3 +329,40 @@ Assumptions made without asking: background-only; read-only tools confined to th
 `.git`, paths outside the repo, special files and gitignored files; 12 tool rounds, 20,000-character
 results, an input budget of 80% of the model's limit; 20-second git timeouts; failures post
 nothing and are shown as the integration's last error.
+
+## S9. Follow-up: webview sidebar, grouped All Changes, thread navigation
+
+### User
+
+> Hmm weird. I told an agent to post its review to the extension [...] 1. I see no group headings or
+> group descriptions. Nor does it appear like the files are ordered in ascending order by group
+> size [...] 2. [...] it's too hard to tell whether there are comments above or below the current
+> scroll position. [...] Could you add a toolbar at the top right of the editor pane? Probably
+> there should be 4 buttons for going To next thread, Previous thread. Next unresolved threat and
+> previous unresolved thread, plus a dropdown showing all threads. In the drop down the individual
+> items should show the relative path + filename and beginning of thread text (X/Y.cs: blah blah
+> blah...) 3. BTW I didn't say anything about the sort order within a group. Within a group The
+> files should be listed in order by path and filename.
+
+> Now that you mention it, I do see a bunch of stuff in the sidebar that looks like the 6 groups.
+> I didn't know what to make of it at first. Was this implemented instead of the thing I wanted?
+
+> That tree view on the left is kind of confusing; the groups aren't distinctive, the description
+> looks like stray text as you say, and the files are not indented with respect to their groups
+
+> Is there some reason why the sidebar sidebar has to be a tree view? But the tree view seems like
+> a straitjacket for formatting.
+
+Answer: "Webview, replace the tree"; grouped Open All Changes: "Yes, try it".
+
+> - issues in sidebar are not shown in proper order; The order should of course match the order
+>   they appear in code and the order they appear in the main combined view
+> - clicking on one of the threads in the sidebar doesn't necessarily scroll to it in the main pane
+>   [...] when I click the second issue it scrolls too high [...] The issue (about "one-time
+>   costs") appears on line 258
+
+Cause of the scrolling bug: VS Code draws a thread's widget below the last line of its range, but
+the reveal targeted the first line. VS Code findings: identical (modified, original) pairs blank
+the multi-diff editor; no reliable way exists to reveal a line inside the multi-diff editor, so
+threads open in a single-file diff editor. Unanswered: whether the sidebar's buttons should move
+back to the view's title bar.

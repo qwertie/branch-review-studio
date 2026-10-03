@@ -10,10 +10,22 @@ rather than humans.
   gets its base branch from the setting `branchReviewStudio.baseBranch` (or from `review_begin`'s
   `baseBranch` argument) and keeps it until you run **Change Base Branch…**.
 - Clicking a file opens a diff editor (merge-base vs. working file). The modified side is the real
-  file, so you can edit it in place. **Open All Changes** opens all files in one multi-diff editor.
+  file, so you can edit it in place. **Open All Changes** opens all files in one multi-diff editor,
+  in the order of the view.
 - If the reviewing agent posts groups of related changes, the view lists the files under their
   groups, smallest group first, and each group's diffs show only that group's changes (see
   "Groups of related changes" below).
+- Each file lists its threads, sorted by their current line (a thread on the base side by where
+  its line appears in the diff), with severity, open/resolved state and the start of the first
+  comment. Clicking a thread opens the file's diff and scrolls to the thread, so that its last
+  line and the thread's comments (which VS Code shows below that line) are visible. **Unresolved
+  only** (in the view's header) hides resolved threads.
+- **Previous Thread** / **Next Thread**, **Previous Unresolved Thread** / **Next Unresolved
+  Thread** and **Go to Thread…** (a searchable list) are buttons in the editor's title bar (top
+  right) while the review has threads, and commands in the Command Palette. They follow the view's
+  order, starting from the cursor in the active editor if it shows a review file (in a diff, a
+  group's view or Open All Changes), else from the last thread you went to, and wrap around at the
+  end with a message in the status bar.
 - Review comments appear as comment threads (VS Code Comments API) in the diff editor, in normal
   editors, and in the Comments panel. You can reply, resolve, reopen, delete, and start new threads
   on changed files.
@@ -33,7 +45,7 @@ rather than humans.
   send the message to a VS Code language model (e.g. from GitHub Copilot), which answers with
   read-only access to the repo but can't review branches or edit files (see "VS Code language
   models" below).
-- The **Settings and Integrations** button (gear) in the view's title bar opens the Branch Review
+- The **Settings and Integrations** button (gear) in the view's header opens the Branch Review
   Studio panel: how to start a review, the base branch, and the status of each integration.
 
 ## Install (per user)
@@ -95,9 +107,14 @@ branches or stashes.
 ## Usage
 
 1. Open a git repo (or one of its worktrees) in VS Code and click the Branch Review icon in the
-   Activity Bar. The header row shows `<branch> vs <baseRef> @ <merge-base>`.
+   Activity Bar. The view's header shows `<branch> vs <baseRef> <merge-base>` and buttons for
+   **Change Base Branch…**, **Switch Branch…**, **Open All Changes**, **Refresh** and **Settings and
+   Integrations**. Hover over a file for buttons that open the file itself or its whole-file diff.
+   The view is a webview. As in VS Code's trees, Tab moves to the list of files as a whole, and the
+   arrow keys, Home, End and Enter work on its rows. The view keeps the groups and files you
+   collapsed while VS Code runs.
 2. To compare against a different branch (e.g. `main` instead of `develop`), click the
-   **Change Base Branch…** button (two arrows) in the view's title bar or on the header row, and
+   **Change Base Branch…** button (two arrows) in the view's header, and
    pick a branch; the current base is listed first, then `develop`, `main` and `master`. The choice
    is saved in the branch's review (which is created if needed), so it applies to this branch only,
    and Claude Code's review tools use it too; the `branchReviewStudio.baseBranch` setting doesn't
@@ -208,8 +225,9 @@ A review can divide the branch's changes into groups of related changes, e.g. "F
   The review JSON stores the hunks by merge-base line numbers (with their new lines where a view
   needs them), plus the merge-base, so later edits don't shift them. The tool's result lists
   ranges that overlap no change and changes that no range covers, so the agent can correct them.
-- **Tree:** each group is a row with its name, size and number of files (tooltip: the summary),
-  followed by its summary (dimmed) and its files, each with its threads. A file appears under every
+- **View:** each group is a numbered heading ("1. Name") with its size and number of files,
+  followed by its summary (markdown: bold, italic, code, lists; HTML and links are shown as text)
+  and its files, sorted by path, each with its threads. A file appears under every
   group whose view of it shows a change (one of the group's hunks or an unassigned hunk), and a file
   without hunks under every group listed for it; "partial" marks a file of which the group shows
   only some changes. Groups are sorted by size, smallest first, where size = the number of changed
@@ -218,15 +236,25 @@ A review can divide the branch's changes into groups of related changes, e.g. "F
   posted) and unchanged files with threads are listed last, under **Ungrouped**. Grouped files
   that are no longer changed are hidden; a group left with no changes still appears (as "no
   changes", sorted first), so that a grouping mistake stands out. `review_set_groups` also tells
-  the agent about changed files it put in no group. Without groups, the tree lists the files by
-  path.
-- **Diffs:** clicking a group opens its files in a multi-diff editor titled with the group's name;
-  clicking a file under a group opens that group's view of the file. In a group's view, the left
+  the agent about changed files it put in no group. Without groups, the view lists the files by
+  path. Thread navigation visits the threads of a file that is in several groups under the first.
+- **Open All Changes** shows, for each group in the view's order, a heading entry (a read-only
+  markdown document named like "1. Name — 12 lines, 3 files.md" that holds the summary), then the
+  group's files, each showing that group's view of the file. A file in several groups appears once
+  per group. Ungrouped files come last, under an "Ungrouped" heading. (VS Code's multi-diff editor
+  shows nothing if two entries have the same left and right documents, so a file's later
+  appearances always use the group's view, whose left side differs per group.) With stale groups
+  (see below), it lists the changed files by path.
+- **Diffs:** clicking a group's heading opens its heading entry and files in a multi-diff editor
+  titled with the group's heading; clicking a file under a group opens that group's view of the
+  file. In a group's view, the left
   side is the merge-base version with the hunks that belong only to other groups applied, so the
   diff shows this group's hunks, unassigned hunks, and any changes made after the groups were
   posted. The right side is the real file, so editing and comment threads work as usual, but
   threads on the base side and new comments on the left side are available only in the whole-file
-  diff (the diff button on the file's row, or **Open All Changes**).
+  diff (the diff button on the file's row, or **Open All Changes** without groups). A thread opens
+  in a single-file diff even when Open All Changes is open, since VS Code offers extensions no
+  reliable way to scroll its multi-diff editor to a line.
 - **Stale groups:** if the merge-base changes (e.g. after **Fetch Base Branch** or **Change Base
   Branch…**), the frozen hunks no longer apply, so the diffs show whole files and the group rows
   say "regroup: merge-base changed"; ask the agent to post the groups again.
@@ -283,7 +311,8 @@ The extension and MCP server do not modify any tracked files in your repos. They
 - `npm run sample-review -- <repo> [--force]`: writes a sample review for the repo's current branch
 - `npm run smoke-test -- <repo>`: runs `scripts/smoke-test.ts` inside VS Code (throwaway profile)
   against a repo that has a sample review. With `BRS_SCREENSHOT_DIR=<folder>` it also saves
-  screenshots of the Extension Development Host window (Windows only) and the panel's HTML. It
+  screenshots of the Extension Development Host window (Windows only) and the HTML of the panel
+  and the Branch Review view. It
   checks the panel's VS Code Language Models section; with `BRS_SMOKE_LM=1` and a language model
   available in the throwaway profile (usually none is), it also runs Ask Agent with that model,
   which spends tokens. With `BRS_SMOKE_ASK_AGENT=1`

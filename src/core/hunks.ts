@@ -60,6 +60,26 @@ export function parseDiffHunks(diffOutput: string)
 }
 
 /**
+ * Converts a merge-base line number of a file to a position in its working-tree version, given
+ * the file's hunks (see readDiffHunks), e.g. to sort threads on both sides of a diff. Lines that a
+ * hunk removed or changed get fractional positions, in order, between the two working-tree lines
+ * that a diff shows them between; other lines get their working-tree line number.
+ */
+export function mapBaseLineToWorkingTree(hunks: DiffHunk[], baseLine: number): number {
+  let offset = 0;
+  for (let hunk of hunks) {
+    let lastOldLine = hunk.oldCount === 0 ? hunk.oldStart : hunk.oldStart + hunk.oldCount - 1;
+    if (hunk.oldCount > 0 && baseLine >= hunk.oldStart && baseLine <= lastOldLine) {
+      let lineBefore = hunk.newLines.length > 0 ? hunk.newStart - 1 : hunk.newStart;
+      return lineBefore + (baseLine - hunk.oldStart + 1) / (hunk.oldCount + 1);
+    }
+    if (lastOldLine < baseLine)
+      offset += hunk.newLines.length - hunk.oldCount;
+  }
+  return baseLine + offset;
+}
+
+/**
  * Applies `hunks` (sorted by position; insertions at the same position keep their order) to
  * `baseText` and returns the result. Line terminators are kept as they are in both inputs.
  */

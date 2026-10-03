@@ -2,7 +2,7 @@
   "name": "branch-review-studio",
   "displayName": "Branch Review Studio",
   "description": "Review a branch's working tree against its merge-base with develop, with comment threads exchanged with AI agents (Claude Code, Codex) or VS Code language models.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "qwertie",
   "private": true,
   "license": "Unlicense",
@@ -39,6 +39,7 @@
     "views": {
       "branchReviewStudio": [
         {
+          "type": "webview",
           "id": "branchReviewStudio.files",
           "name": "Branch Review"
         }
@@ -70,15 +71,34 @@
         "icon": "$(diff)"
       },
       {
-        "command": "branchReviewStudio.openFile",
-        "title": "Open File",
+        "command": "branchReviewStudio.openThread",
+        "title": "Go to Thread…",
         "category": "Branch Review Studio",
-        "icon": "$(go-to-file)"
+        "icon": "$(comment-discussion)"
       },
       {
-        "command": "branchReviewStudio.openThread",
-        "title": "Go to Thread",
-        "category": "Branch Review Studio"
+        "command": "branchReviewStudio.previousThread",
+        "title": "Previous Thread",
+        "category": "Branch Review Studio",
+        "icon": "$(chevron-up)"
+      },
+      {
+        "command": "branchReviewStudio.nextThread",
+        "title": "Next Thread",
+        "category": "Branch Review Studio",
+        "icon": "$(chevron-down)"
+      },
+      {
+        "command": "branchReviewStudio.previousUnresolvedThread",
+        "title": "Previous Unresolved Thread",
+        "category": "Branch Review Studio",
+        "icon": "$(arrow-circle-up)"
+      },
+      {
+        "command": "branchReviewStudio.nextUnresolvedThread",
+        "title": "Next Unresolved Thread",
+        "category": "Branch Review Studio",
+        "icon": "$(arrow-circle-down)"
       },
       {
         "command": "branchReviewStudio.switchBranch",
@@ -162,51 +182,36 @@
     "menus": {
       "view/title": [
         {
-          "command": "branchReviewStudio.openAllChanges",
-          "when": "view == branchReviewStudio.files",
-          "group": "navigation@1"
-        },
-        {
-          "command": "branchReviewStudio.switchBranch",
-          "when": "view == branchReviewStudio.files",
-          "group": "navigation@2"
-        },
-        {
-          "command": "branchReviewStudio.changeBaseBranch",
-          "when": "view == branchReviewStudio.files",
-          "group": "navigation@3"
-        },
-        {
-          "command": "branchReviewStudio.refresh",
-          "when": "view == branchReviewStudio.files",
-          "group": "navigation@4"
-        },
-        {
-          "command": "branchReviewStudio.openSettings",
-          "when": "view == branchReviewStudio.files",
-          "group": "navigation@5"
-        },
-        {
           "command": "branchReviewStudio.fetchBase",
           "when": "view == branchReviewStudio.files",
           "group": "1_base"
         }
       ],
-      "view/item/context": [
+      "editor/title": [
         {
-          "command": "branchReviewStudio.changeBaseBranch",
-          "when": "view == branchReviewStudio.files && viewItem == brsHeader",
-          "group": "inline@1"
+          "command": "branchReviewStudio.previousThread",
+          "when": "branchReviewStudio.hasThreads",
+          "group": "navigation@1"
         },
         {
-          "command": "branchReviewStudio.openFile",
-          "when": "view == branchReviewStudio.files && viewItem == brsFile",
-          "group": "inline@1"
+          "command": "branchReviewStudio.nextThread",
+          "when": "branchReviewStudio.hasThreads",
+          "group": "navigation@2"
         },
         {
-          "command": "branchReviewStudio.openFileDiff",
-          "when": "view == branchReviewStudio.files && viewItem == brsFile",
-          "group": "inline@2"
+          "command": "branchReviewStudio.previousUnresolvedThread",
+          "when": "branchReviewStudio.hasThreads",
+          "group": "navigation@3"
+        },
+        {
+          "command": "branchReviewStudio.nextUnresolvedThread",
+          "when": "branchReviewStudio.hasThreads",
+          "group": "navigation@4"
+        },
+        {
+          "command": "branchReviewStudio.openThread",
+          "when": "branchReviewStudio.hasThreads",
+          "group": "navigation@5"
         }
       ],
       "comments/commentThread/context": [
@@ -250,14 +255,6 @@
         },
         {
           "command": "branchReviewStudio.openFileDiff",
-          "when": "false"
-        },
-        {
-          "command": "branchReviewStudio.openFile",
-          "when": "false"
-        },
-        {
-          "command": "branchReviewStudio.openThread",
           "when": "false"
         },
         {
@@ -334,6 +331,7 @@
   "devDependencies": {
     "@types/node": "^22.20.5",
     "@types/vscode": "^1.140.0",
+    "@vscode/codicons": "^0.0.46-24",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",

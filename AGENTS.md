@@ -3,9 +3,10 @@
 This repo contains Branch Review Studio, a per-user tool for reviewing a branch before it is merged,
 with comment threads exchanged with AI agents (Claude Code or Codex). It has three parts:
 
-1. src/extension/ (VS Code extension): tree view of changed files vs. the merge-base with the base
-   branch, diff editors, comment threads (Comments API), branch/worktree switching, a settings and
-   status panel, and commands that send thread messages to an agent ("Ask Agent").
+1. src/extension/ (VS Code extension): Branch Review view (a webview) of changed files vs. the
+   merge-base with the base branch, diff editors, comment threads (Comments API), thread
+   navigation, branch/worktree switching, a settings and status panel, and commands that send
+   thread messages to an agent ("Ask Agent").
 2. src/mcp/ (stdio MCP server): tools (`review_begin`, `review_comment`, `review_reply`, ...) that
    let agents post review threads into the review store.
 3. skills/branch-review-studio/ (agent skill): the branch review procedure, which posts findings

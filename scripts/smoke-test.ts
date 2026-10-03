@@ -8,9 +8,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { AgentRunMode, AgentSessionMode, getAgentChoices } from "../src/core/agent-commands";
+import { createAnchor } from "../src/core/anchoring";
 import { ChangedFile, getBaseBranchChoices, getFileAtRevision, listBranches, MergeBaseInfo } from "../src/core/git";
 import { applyHunks, DiffHunk, readDiffHunks } from "../src/core/hunks";
-import { createReview, findLatestSession, formatCount, IntegrationId } from "../src/core/review";
+import { addThread, createReview, findLatestSession, formatCount, IntegrationId } from "../src/core/review";
+import { listChangesEntries, listThreadVisits, ThreadVisit } from "../src/core/review-outline";
 import { ReviewStore } from "../src/core/store";
 import type { BranchReviewStudioExports } from "../src/extension/extension";
 import { ReviewTools } from "../src/mcp/review-tools";
@@ -74,8 +76,9 @@ export async function run(): Promise<void> {
       console.log(`INFO active editor=${editor?.document.uri.toString()} `
         + `selectionLine=${editor?.selection.active.line}`);
     });
-    await check("review_set_groups: the tree shows groups; group views show only their hunks", () =>
+    await check("review_set_groups: the view shows groups; group views show only their hunks", () =>
       checkGroups(model));
+    await checkReviewUi(model, exports!, check);
     await check("settings relevant to inline diff and sticky scroll", () => {
       let config = vscode.workspace.getConfiguration();
       console.log(`INFO diffEditor.renderSideBySide=${config.get("diffEditor.renderSideBySide")} `
@@ -240,46 +243,26 @@ async function checkLanguageModelAnswer(model: Model,
 }
 
 /**
- * Posts groups with ReviewTools (as the MCP server would): the first and the other hunks of a
- * modified file with several hunks go into groups "first" and "rest", and every other changed file
- * into "rest". Checks the tree's layout and both kinds of diff editors, then restores the review's
- * previous groups.
+ * Posts groups (see postSmokeGroups) with every other changed file in "rest". Checks the groups'
+ * layout and both kinds of diff editors, then restores the review's previous groups.
  */
 async function checkGroups(model: Model) {
   let { changedFiles, mergeBase } = model.snapshot;
-  let split: { file: ChangedFile, hunks: DiffHunk[] } | undefined;
-  for (let file of changedFiles.filter(f => f.status === "Modified")) {
-    let hunks = await readDiffHunks(model.repoRoot, mergeBase!.mergeBaseSha, file);
-    if (split === undefined && hunks.length >= 2 && hunks[0].newLines.length > 0)
-      split = { file, hunks };
-  }
-  assert.ok(split, "the test repo needs a modified file with two or more hunks");
-  let firstHunk = split.hunks[0];
+  let split = await findSplitFile(model);
   let previousGroups = model.snapshot.review!.changeGroups;
-  let tools = new ReviewTools({ cwd: model.repoRoot, sessionId: undefined, agent: "claude", agentName: "Claude" });
   try {
-    let result = await tools.setGroups({ groups: [{ id: "first", name: "Smoke: first hunk", summary: "The **first** "
-      + "hunk of a file with several hunks; this summary is long enough to be wrapped onto two lines in the tree." },
-    { id: "rest", name: "Smoke: the rest", summary: "Everything else." }],
-    files: changedFiles.map(f => f === split.file ? { file: f.path, groups: [
-      { groupId: "first", ranges: [{ startLine: firstHunk.newStart, endLine: firstHunk.newStart }] },
-      { groupId: "rest", ranges: split.hunks.slice(1).map(h => ({ startLine: Math.max(h.newStart, 1),
-        endLine: Math.max(h.newStart + h.newLines.length - 1, h.newStart, 1) })) }] }
-      : { file: f.path, groups: [{ groupId: "rest" }] }) });
-    console.log(`INFO review_set_groups: ${result}`);
-    await model.refresh();
+    await postSmokeGroups(model, split, changedFiles);
     let layout = model.snapshot.groupLayout;
     console.log(`INFO layout: ${JSON.stringify(layout?.groups.map(g => [g.name, g.changedLines, g.files.length]))}`);
     let firstGroup = layout?.groups.find(g => g.id === "first");
     assert.deepEqual(firstGroup?.files, [{ path: split.file.path, isPartial: true }]);
     assert.ok(layout?.groups.find(g => g.id === "rest")?.files.some(f => f.path === split.file.path && f.isPartial));
 
-    await vscode.commands.executeCommand("branchReviewStudio.openGroupChanges", firstGroup);
+    await vscode.commands.executeCommand("branchReviewStudio.openGroupChanges", "first");
     await delay(1500);
     let tabs = vscode.window.tabGroups.all.flatMap(g => g.tabs);
-    assert.ok(tabs.some(t => t.label.includes("Smoke: first hunk")), `tabs: ${tabs.map(t => t.label).join(", ")}`);
-    await vscode.commands.executeCommand("branchReviewStudio.openFileDiff", split.file.path,
-      { groupId: "first", groupName: firstGroup!.name });
+    assert.ok(tabs.some(t => t.label.includes("1. Smoke: first hunk")), `tabs: ${tabs.map(t => t.label).join(", ")}`);
+    await vscode.commands.executeCommand("branchReviewStudio.openFileDiff", split.file.path, "first");
     await delay(1000);
     let input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
     assert.ok(input instanceof vscode.TabInputTextDiff, "active tab is not a diff");
@@ -299,6 +282,183 @@ async function checkGroups(model: Model) {
       review.changeGroups = previousGroups;
     });
   }
+}
+
+/**
+ * Posts smoke-test groups (see postSmokeGroups) with up to three other modified files in "rest",
+ * and adds a 34-line Major thread and a resolved thread to the longest added file and a thread to
+ * the split file's first hunk. Checks the Branch Review view's HTML, the grouped Open All Changes
+ * editor, thread navigation and the reveal of the long thread (with screenshots if
+ * BRS_SCREENSHOT_DIR is set), then restores the review's groups and threads.
+ */
+async function checkReviewUi(model: Model, exports: BranchReviewStudioExports,
+  check: (name: string, action: () => Promise<void>) => Promise<void>) {
+  let { changedFiles, branch, mergeBase } = model.snapshot;
+  let split = await findSplitFile(model);
+  let previous = model.snapshot.review!;
+  let previousThreadIds = previous.threads.map(t => t.id);
+  let longFile = await findLongestAddedFile(model);
+  let longThreadId = "";
+  let screenshot = (name: string) => process.env.BRS_SCREENSHOT_DIR
+    && captureWindow(path.join(process.env.BRS_SCREENSHOT_DIR, name));
+  try {
+    await postSmokeGroups(model, split, changedFiles.filter(f => f.status === "Modified").slice(0, 3));
+    let longLines = (await model.getFileLines(longFile, "modified"))!;
+    let splitLines = (await model.getFileLines(split.file.path, "modified"))!;
+    let claude = { kind: "agent" as const, name: "Claude" };
+    await model.modifyReview(review => {
+      longThreadId = addThread(review, { file: longFile, side: "modified", anchor: createAnchor(longLines, 30, 63),
+        severity: "Major", author: claude, body: "**Major:** these one-time costs are counted twice, since "
+          + "`Totals.Add` runs once per scenario. <img src=x onerror=alert(1)> Smoke test thread on lines 30-63." }).id;
+      let line = split.hunks[0].newStart;
+      addThread(review, { file: split.file.path, side: "modified", anchor: createAnchor(splitLines, line, line),
+        severity: "Minor", author: claude, body: "**Minor:** a smoke-test thread in group `first`." });
+      addThread(review, { file: longFile, side: "modified", anchor: createAnchor(longLines, 10, 10),
+        severity: "Note", author: claude, body: "A *resolved* smoke-test thread." }).status = "resolved";
+    });
+    let visits = listThreadVisits(model.snapshot.outline);
+    console.log(`INFO thread order: ${JSON.stringify(visits.map(v => [v.section.title, v.file.path, v.thread.line]))}`);
+
+    await check("the Branch Review view lists numbered groups, files and threads in order; agent text is escaped",
+      async () => {
+        await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+        await vscode.commands.executeCommand("workbench.view.extension.branchReviewStudio");
+        await delay(2000);
+        let html = exports.getReviewViewHtml();
+        let positions = ["1. Smoke: first hunk", "Minor: a smoke-test thread", "2. Smoke: the rest",
+          ">Ungrouped<", "A resolved smoke-test thread", "Major: these one-time costs"].map(text => html.indexOf(text));
+        assert.ok(positions.every((p, i) => p >= 0 && (i === 0 || p > positions[i - 1])), `positions ${positions}`);
+        assert.ok(!html.includes("<img") && html.includes("&#60;img src=x"), "agent text was not escaped");
+        screenshot("review-view.png");
+        if (process.env.BRS_SCREENSHOT_DIR)
+          fs.writeFileSync(path.join(process.env.BRS_SCREENSHOT_DIR, "review-view.html"), html);
+      });
+    await check("Open All Changes shows group headings, then each group's files; a file in two groups twice",
+      async () => {
+        let entries = listChangesEntries(model.snapshot.outline);
+        assert.deepEqual(entries.flatMap(e => e.kind === "file" && e.change.path === split.file.path ? [e.viewGroupId]
+          : []), ["first", "rest"]);
+        await vscode.commands.executeCommand("branchReviewStudio.openAllChanges");
+        await delay(4000);
+        let tabs = vscode.window.tabGroups.all.flatMap(g => g.tabs).map(t => t.label);
+        assert.ok(tabs.includes(`${branch} vs ${mergeBase!.baseRef} (${entries.length} files)`), `tabs: ${tabs}`);
+        let headings = vscode.window.visibleTextEditors.filter(e => e.document.uri.scheme === "brs-heading");
+        console.log(`INFO visible editors: ${vscode.window.visibleTextEditors.map(e => e.document.uri.toString())}`);
+        // The modified side of an entry is the real file, so it can be edited (the test then undoes
+        // its edit and saves)
+        let fileEditor = vscode.window.visibleTextEditors.find(e => e.document.uri.scheme === "file");
+        let start = new vscode.Position(0, 0);
+        assert.ok(fileEditor && await fileEditor.edit(b => b.insert(start, "x")) && fileEditor.document.isDirty,
+          "could not edit the file in the multi-diff editor");
+        await fileEditor.edit(b => b.delete(new vscode.Range(start, start.translate(0, 1))));
+        await fileEditor.document.save();
+        let headingText = headings[0]?.document.getText();
+        assert.ok(headingText?.startsWith("# 1. Smoke: first hunk\n\n1 line, 1 file\n\nThe **first**"),
+          `heading: ${headingText}`);
+        // Makes room so that the screenshot shows the second group
+        for (let command of ["workbench.action.closePanel", "workbench.action.closeAuxiliaryBar",
+          "workbench.action.zoomOut", "workbench.action.zoomOut"])
+          await vscode.commands.executeCommand(command);
+        await delay(2000);
+        screenshot("all-changes-grouped.png");
+        await vscode.commands.executeCommand("workbench.action.zoomReset");
+      });
+    await check("Next/Previous (Unresolved) Thread follow the view's order and wrap around", async () => {
+      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+      let expectRevealed = async (command: string, visit: ThreadVisit) => {
+        await vscode.commands.executeCommand(`branchReviewStudio.${command}`);
+        await delay(1200);
+        let editors = vscode.window.visibleTextEditors.map(e => `${model.getRelativePath(e.document.uri.fsPath)}:`
+          + (e.selection.active.line + 1));
+        let expected = `${visit.file.path}:${visit.thread.line}`;
+        assert.ok(editors.includes(expected), `after ${command}, expected ${expected}; editors: ${editors}`);
+      };
+      await vscode.commands.executeCommand("branchReviewStudio.openThread", visits[0].thread.thread.id);
+      await delay(500);
+      await expectRevealed("nextThread", visits[1]);
+      await expectRevealed("previousThread", visits[0]);
+      await expectRevealed("previousThread", visits.at(-1)!);
+      await expectRevealed("nextUnresolvedThread", visits.find(v => v.thread.thread.status === "open")!);
+      screenshot("navigation.png");
+    });
+    await check("Bug_2026_10_RevealedThreadWidgetOffScreen: revealing a long thread shows its last line and "
+      + "its widget, which is below that line", async () => {
+      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+      await vscode.commands.executeCommand("branchReviewStudio.openThread", longThreadId);
+      await delay(2000);
+      let editor = vscode.window.activeTextEditor!;
+      let ranges = editor.visibleRanges.map(r => `${r.start.line + 1}-${r.end.line + 1}`);
+      console.log(`INFO long thread: active=${editor.document.uri.fsPath} cursor=${editor.selection.active.line + 1} `
+        + `visible=${ranges}`);
+      assert.equal(model.getRelativePath(editor.document.uri.fsPath), longFile);
+      assert.equal(editor.selection.active.line + 1, 30);
+      // Line 64 is below the widget, so the widget is visible if lines 63 and 64 are
+      assert.ok(editor.visibleRanges.some(r => r.start.line + 1 <= 63 && r.end.line + 1 >= 64), `visible ${ranges}`);
+      screenshot("reveal-long-thread.png");
+    });
+    await check("Go to Thread… lists the threads in order and reveals the picked one", async () => {
+      let index = visits.findIndex(v => v.thread.thread.id === longThreadId);
+      let pending = vscode.commands.executeCommand("branchReviewStudio.openThread");
+      await delay(1500);
+      screenshot("go-to-thread.png");
+      await vscode.commands.executeCommand("workbench.action.quickOpenSelectNext");
+      await vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem");
+      await pending;
+      await delay(1200);
+      let target = visits[(index + 1) % visits.length];
+      let editors = vscode.window.visibleTextEditors.map(e => model.getRelativePath(e.document.uri.fsPath));
+      assert.ok(editors.includes(target.file.path), `expected ${target.file.path}; editors: ${editors}`);
+    });
+  } finally {
+    await model.modifyReview(review => {
+      review.changeGroups = previous.changeGroups;
+      review.threads = review.threads.filter(t => previousThreadIds.includes(t.id));
+    });
+  }
+}
+
+/**
+ * Posts groups with ReviewTools (as the MCP server would): the first and the other hunks of
+ * `split.file` go into groups "first" and "rest", and `restFiles` into "rest".
+ */
+async function postSmokeGroups(model: Model, split: { file: ChangedFile, hunks: DiffHunk[] },
+  restFiles: ChangedFile[]) {
+  let firstHunk = split.hunks[0];
+  let tools = new ReviewTools({ cwd: model.repoRoot, sessionId: undefined, agent: "claude", agentName: "Claude" });
+  let result = await tools.setGroups({ groups: [{ id: "first", name: "Smoke: first hunk", summary: "The **first** "
+    + "hunk of a file with several hunks; this summary is long enough to be wrapped onto two lines.\n\n- It has "
+    + "a list with `code`\n- and <img src=x onerror=alert(1)> [a link](javascript:alert(1))" },
+  { id: "rest", name: "Smoke: the rest", summary: "Everything else." }],
+  files: [{ file: split.file.path, groups: [
+    { groupId: "first", ranges: [{ startLine: firstHunk.newStart, endLine: firstHunk.newStart }] },
+    { groupId: "rest", ranges: split.hunks.slice(1).map(h => ({ startLine: Math.max(h.newStart, 1),
+      endLine: Math.max(h.newStart + h.newLines.length - 1, h.newStart, 1) })) }] },
+  ...restFiles.filter(f => f !== split.file).map(f => ({ file: f.path, groups: [{ groupId: "rest" }] }))] });
+  console.log(`INFO review_set_groups: ${result}`);
+  await model.refresh();
+}
+
+/** Finds a modified file with two or more hunks, the first of which adds lines. */
+async function findSplitFile(model: Model): Promise<{ file: ChangedFile, hunks: DiffHunk[] }> {
+  let { changedFiles, mergeBase } = model.snapshot;
+  for (let file of changedFiles.filter(f => f.status === "Modified")) {
+    let hunks = await readDiffHunks(model.repoRoot, mergeBase!.mergeBaseSha, file);
+    if (hunks.length >= 2 && hunks[0].newLines.length > 0)
+      return { file, hunks };
+  }
+  throw new Error("the test repo needs a modified file with two or more hunks");
+}
+
+/** Finds the added file with the most lines (it needs 80 or more), preferring source files. */
+async function findLongestAddedFile(model: Model): Promise<string> {
+  let best = { file: "", lineCount: 0 };
+  for (let file of model.snapshot.changedFiles.filter(f => f.status === "Added" && /\.(cs|tsx?|go)$/.test(f.path))) {
+    let lineCount = (await model.getFileLines(file.path, "modified"))?.length ?? 0;
+    if (lineCount > best.lineCount)
+      best = { file: file.path, lineCount };
+  }
+  assert.ok(best.lineCount >= 80, "the test repo needs an added source file with 80 or more lines");
+  return best.file;
 }
 
 /** Gets the index of an Ask Agent QuickPick item for a new thread, if both agents are found. */

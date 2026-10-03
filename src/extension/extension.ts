@@ -6,21 +6,27 @@ import { IntegrationErrorLog } from "../core/integration-status";
 import { ReviewStore } from "../core/store";
 import { AgentServices } from "./agents";
 import { askAgent } from "./ask-agent";
-import { BaseContentProvider, baseScheme, GroupViewContentProvider, groupViewScheme } from "./base-content";
+import {
+  BaseContentProvider, baseScheme, getReviewFileOfUri, GroupViewContentProvider, groupViewScheme,
+  HeadingContentProvider, headingScheme,
+} from "./base-content";
 import { changeBaseBranch } from "./change-base-branch";
 import { ReviewCommentController } from "./comments";
-import { fetchBase, openAllChanges, openFileDiff, openGroupChanges, openThread } from "./diff-commands";
+import { fetchBase, openAllChanges, openFileDiff, openGroupChanges } from "./diff-commands";
 import { installMcpServer, installSkill, uninstall, updateInstalledServerIfOutdated } from "./install";
 import { chooseLanguageModel } from "./language-models";
 import { BranchReviewModel } from "./model";
-import { ReviewTreeNode, ReviewTreeProvider } from "./review-tree";
+import { ReviewViewProvider, reviewViewId } from "./review-view";
 import { SettingsPanel } from "./settings-panel";
 import { switchBranch } from "./switch-branch";
+import { ThreadNavigator } from "./thread-navigation";
 
 /** What `activate` returns; scripts/smoke-test.ts uses it to inspect the extension's state. */
 export interface BranchReviewStudioExports {
   model: BranchReviewModel | undefined;
   getSettingsPanelHtml: () => string | undefined;
+  /** Gets the body HTML of the Branch Review view */
+  getReviewViewHtml: () => string;
 }
 
 /**
@@ -35,21 +41,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<Branch
   void updateInstalledServerIfOutdated(context, log).catch(e => log.appendLine(getErrorMessage(e)));
   let model = await createModel(log);
   registerRepoIndependentCommands(services, model);
-  if (model === undefined) {
-    registerCommands(context, undefined, services);
-  } else {
-    let comments = new ReviewCommentController(model);
-    let tree = new ReviewTreeProvider(model);
+  let comments = model && new ReviewCommentController(model);
+  let navigator = model && comments && new ThreadNavigator(model, comments);
+  let view = new ReviewViewProvider(context.extensionUri, model, navigator);
+  context.subscriptions.push(view, vscode.window.registerWebviewViewProvider(reviewViewId, view,
+    { webviewOptions: { retainContextWhenHidden: true } }));
+  registerCommands(context, model, services, comments, navigator);
+  if (model && comments && navigator) {
     let groupViews = new GroupViewContentProvider(model);
-    context.subscriptions.push(model, comments, tree, groupViews,
-      vscode.window.registerTreeDataProvider("branchReviewStudio.files", tree),
+    let headings = new HeadingContentProvider(model);
+    context.subscriptions.push(model, comments, navigator, groupViews, headings,
       vscode.workspace.registerTextDocumentContentProvider(baseScheme, new BaseContentProvider()),
-      vscode.workspace.registerTextDocumentContentProvider(groupViewScheme, groupViews));
-    registerCommands(context, model, services, comments);
+      vscode.workspace.registerTextDocumentContentProvider(groupViewScheme, groupViews),
+      vscode.workspace.registerTextDocumentContentProvider(headingScheme, headings));
     await watchForChanges(context, model);
     await model.refresh();
   }
-  return { model, getSettingsPanelHtml: SettingsPanel.getHtmlIfOpen };
+  return { model, getSettingsPanelHtml: SettingsPanel.getHtmlIfOpen, getReviewViewHtml: () => view.getBody() };
 }
 
 export function deactivate(): void {}
@@ -78,20 +86,20 @@ function registerRepoIndependentCommands(services: AgentServices, model: BranchR
 
 /** Registers commands that need a git repo; without one (`model` undefined), they show an error. */
 function registerCommands(context: vscode.ExtensionContext, model: BranchReviewModel | undefined,
-  services: AgentServices, comments?: ReviewCommentController): void {
+  services: AgentServices, comments?: ReviewCommentController, navigator?: ThreadNavigator): void {
   let commands: Record<string, (model: BranchReviewModel, ...args: never[]) => unknown> = {
     refresh: m => m.refresh(),
     openAllChanges,
-    openGroupChanges,
-    // A tree row's click passes the file and, for a group's view, the group; its diff button passes the node
-    openFileDiff: (m, arg?: string | ReviewTreeNode, view?: { groupId: string, groupName: string }) => {
-      let file = typeof arg === "string" ? arg : arg?.kind === "file" ? arg.file.path : getActiveEditorFile(m);
-      return file === undefined ? undefined : openFileDiff(m, file, undefined, typeof arg === "string" ? view
-        : undefined);
-    },
-    openFile: (m, node?: ReviewTreeNode) => node?.kind === "file"
-      ? vscode.window.showTextDocument(vscode.Uri.file(m.getFullPath(node.file.path))) : undefined,
-    openThread: (m, threadId: string) => openThread(m, threadId),
+    openGroupChanges: (m, groupId?: string) => openGroupChanges(m, groupId),
+    openFileDiff: (m, file = getActiveEditorFile(m), viewGroupId?: string) =>
+      file === undefined ? undefined : openFileDiff(m, file, undefined, viewGroupId),
+    // From the Command Palette or the editor title bar (no arguments), the user picks a thread
+    openThread: (_, threadId?: string) => threadId === undefined ? navigator?.pickThread()
+      : navigator?.revealThread(threadId),
+    previousThread: () => navigator?.revealAdjacentThread(-1, false),
+    nextThread: () => navigator?.revealAdjacentThread(1, false),
+    previousUnresolvedThread: () => navigator?.revealAdjacentThread(-1, true),
+    nextUnresolvedThread: () => navigator?.revealAdjacentThread(1, true),
     switchBranch,
     changeBaseBranch,
     fetchBase,
@@ -148,5 +156,5 @@ function watchFolder(folder: string, glob: string, onEvent: () => void): vscode.
 
 function getActiveEditorFile(model: BranchReviewModel): string | undefined {
   let uri = vscode.window.activeTextEditor?.document.uri;
-  return uri?.scheme === "file" ? model.getRelativePath(uri.fsPath) : undefined;
+  return uri && getReviewFileOfUri(model, uri);
 }
