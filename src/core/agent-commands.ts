@@ -1,12 +1,15 @@
 import { AnchorLocation } from "./anchoring";
-import { getAuthorLabel, Review, ReviewThread } from "./review";
+import { AgentKind, getAuthorLabel, Review, ReviewThread } from "./review";
 
-/** Name under which the MCP server is registered with Claude Code (`claude mcp add <name>`). */
+/** Name under which the MCP server is registered with agents (`claude mcp add <name>`). */
 export const mcpServerName = "branch-review-studio";
 
-/** 'fork' = resume the review session as a fork (`--fork-session`); 'fresh' = start a new one */
+/**
+ * 'fork' = fork the review session (e.g. `claude --resume <id> --fork-session`); 'fresh' = start a
+ * new one
+ */
 export type AgentSessionMode = "fork" | "fresh";
-/** 'interactive' = a VS Code terminal running claude; 'background' = `claude -p` with no UI */
+/** 'interactive' = a VS Code terminal running the agent; 'background' = e.g. `claude -p` (no UI) */
 export type AgentRunMode = "interactive" | "background";
 
 /** What `buildThreadPrompt` needs to know about a thread that just got a message from the user. */
@@ -24,7 +27,7 @@ export interface ThreadMessageContext {
 const excerptContextLines = 5;
 
 /**
- * Builds the prompt that sends the user's newest thread message to Claude Code. A forked session
+ * Builds the prompt that sends the user's newest thread message to an agent. A forked session
  * already knows the review, so only a fresh session gets the review summary and merge-base.
  */
 export function buildThreadPrompt(context: ThreadMessageContext, sessionMode: AgentSessionMode): string {
@@ -61,36 +64,65 @@ export function buildThreadPrompt(context: ThreadMessageContext, sessionMode: Ag
   return parts.join("\n\n");
 }
 
-/** Parameters of `buildClaudeArgs`. */
-export interface ClaudeInvocation {
+/**
+ * Builds a prompt that asks an agent to review the current branch, following the skill if the
+ * agent has it, and to post its findings with this extension's MCP tools, e.g. for the user to
+ * paste into an agent's chat.
+ */
+export function buildReviewPrompt(branch: string, baseBranch: string): string {
+  return `Review branch \`${branch}\`, following the ${mcpServerName} skill if you have it, and post your `
+    + `findings as Branch Review Studio threads with the \`${mcpServerName}\` MCP tools: call review_begin with `
+    + `baseBranch "${baseBranch}", post each finding `
+    + "with review_comment (file, line, severity, body), then call review_finish with an overall summary. "
+    + "The changes to review are the working tree, including uncommitted and untracked files, compared with "
+    + `the merge-base of HEAD and ${baseBranch} (review_begin reports it).`;
+}
+
+/** Parameters of `AgentIntegration.buildArgs`. */
+export interface AgentInvocation {
   prompt: string;
   sessionMode: AgentSessionMode;
   /** Session to fork; required when `sessionMode` is 'fork' */
   resumeSessionId?: string;
-  /** Id (a UUID) for the new session, so that it can be recorded before the session starts */
+  /**
+   * Id (a UUID) for the new session, so that it can be recorded before the session starts; only for
+   * agents whose `canPreassignSessionId` is true
+   */
   newSessionId?: string;
+  runMode: AgentRunMode;
+  /** Path of this extension's MCP server script (dist/mcp-server.js); Codex runs use it */
+  mcpServerPath: string;
+}
+
+/** Gets the id of the session to fork, throwing if there is none. */
+export function getSessionIdToFork(invocation: AgentInvocation): string {
+  if (!invocation.resumeSessionId)
+    throw new Error("Cannot fork the review session because the review has no recorded session id.");
+  return invocation.resumeSessionId;
+}
+
+/** One way in which Ask Agent can send a thread message (see getAgentChoices). */
+export interface AgentChoice {
+  agent: AgentKind;
+  sessionMode: AgentSessionMode;
   runMode: AgentRunMode;
 }
 
 /**
- * Builds the argument list for the `claude` executable (an argv array, never a shell string, so
- * multi-line prompts need no quoting). Claude may call this extension's MCP tools without asking,
- * since they only write to the review.
+ * Lists the ways in which Ask Agent can send a message to the agents in `availableAgents`, default
+ * first. Only the agent that ran the review session (`forkableAgent`) can fork it, and forking is
+ * cheaper and better informed than a fresh session, so that agent's options come first. Each agent
+ * offers an interactive terminal before a background run.
  */
-export function buildClaudeArgs(invocation: ClaudeInvocation): string[] {
-  // --allowedTools takes a variable number of values, so an option, not the prompt, must follow it
-  let args = ["--allowedTools", `mcp__${mcpServerName}`];
-  if (invocation.runMode === "background")
-    args.push("-p", "--output-format", "stream-json", "--verbose");
-  if (invocation.sessionMode === "fork") {
-    if (!invocation.resumeSessionId)
-      throw new Error("Cannot fork the review session because the review has no recorded session id.");
-    args.push("--resume", invocation.resumeSessionId, "--fork-session");
-  }
-  if (invocation.newSessionId)
-    args.push("--session-id", invocation.newSessionId);
-  args.push(invocation.prompt);
-  return args;
+export function getAgentChoices(availableAgents: AgentKind[], forkableAgent: AgentKind | undefined)
+  : AgentChoice[] {
+  let agents = [...availableAgents.filter(a => a === forkableAgent),
+    ...availableAgents.filter(a => a !== forkableAgent)];
+  let runModes: AgentRunMode[] = ["interactive", "background"];
+  return agents.flatMap(agent => {
+    let sessionModes: AgentSessionMode[] = agent === forkableAgent ? ["fork", "fresh"] : ["fresh"];
+    return sessionModes.flatMap(sessionMode => runModes.map(runMode => ({ agent, sessionMode, runMode })));
+  });
 }
 
 /** Formats the thread's lines and nearby lines with line numbers, marking the former with '>'. */

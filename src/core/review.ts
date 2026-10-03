@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 
 /**
  * The review of one branch: comment threads on files in the branch's working tree, plus the
- * Claude Code sessions that wrote them. Persisted as JSON by ReviewStore.
+ * agent sessions that wrote them. Persisted as JSON by ReviewStore.
  */
 export interface Review {
   /** Format version of the JSON file (see reviewSchemaVersion) */
@@ -29,9 +29,12 @@ export interface Review {
   threads: ReviewThread[];
 }
 
-/** A Claude Code session that contributed to a review. */
+/** An agent session (Claude Code session or Codex thread) that contributed to a review. */
 export interface ReviewSession {
+  /** Claude Code session id, or Codex thread id */
   sessionId: string;
+  /** Agent that ran the session; only that agent can fork it */
+  agent: AgentKind;
   /** Project folder the session ran in; `claude --resume` looks up sessions per project folder */
   cwd: string;
   /** 'review' = the session that produced the review; 'followup' = a session answering a thread */
@@ -40,6 +43,8 @@ export interface ReviewSession {
 }
 
 export type SessionRole = "review" | "followup";
+/** The agents that Branch Review Studio can run: Claude Code and OpenAI Codex. */
+export type AgentKind = "claude" | "codex";
 /** Severities that an agent can give a finding, most severe first. */
 export const severities = ["Critical", "Major", "Minor", "Note"] as const;
 export type Severity = typeof severities[number];
@@ -81,7 +86,7 @@ export interface ReviewComment {
   /** Markdown */
   body: string;
   createdAt: string;
-  /** Claude Code session that wrote the comment, if an agent wrote it */
+  /** Agent session that wrote the comment, if an agent wrote it */
   sessionId?: string;
 }
 
@@ -146,9 +151,10 @@ export function getThread(review: Review, threadId: string): ReviewThread {
 }
 
 /** Adds a session to `review.sessions` (in place) unless a session with that id is there. */
-export function recordSession(review: Review, sessionId: string, cwd: string, role: SessionRole): void {
+export function recordSession(review: Review, sessionId: string, cwd: string, role: SessionRole, agent: AgentKind)
+  : void {
   if (!review.sessions.some(s => s.sessionId === sessionId))
-    review.sessions.push({ sessionId, cwd, role, createdAt: new Date().toISOString() });
+    review.sessions.push({ sessionId, agent, cwd, role, createdAt: new Date().toISOString() });
 }
 
 /** Gets the most recent session with the given role, if any. */

@@ -1,5 +1,5 @@
-import { BackgroundRunResult, ClaudeCommand, runClaudeInBackground } from "./claude-cli";
-import { addComment, recordSession, Review } from "./review";
+import { AgentCommand, AgentIntegration, BackgroundRunResult, runAgentInBackground } from "./agent-integration";
+import { addComment, AgentKind, recordSession, Review } from "./review";
 import { ReviewStore } from "./store";
 
 /** Parameters of `answerThreadInBackground`. */
@@ -7,53 +7,63 @@ export interface BackgroundAnswerRequest {
   store: ReviewStore;
   branch: string;
   threadId: string;
-  claude: ClaudeCommand;
-  /** Arguments from buildClaudeArgs (runMode 'background', with `newSessionId`) */
+  agent: AgentIntegration;
+  command: AgentCommand;
+  /** Arguments from `agent.buildArgs` (runMode 'background') */
   args: string[];
   cwd: string;
-  /** The id passed as `--session-id`; recorded as a follow-up session before Claude starts */
-  newSessionId: string;
-  /** Author name for the fallback comment, e.g. "Claude" */
-  agentName: string;
+  /**
+   * The new session's preassigned id (see AgentIntegration.canPreassignSessionId), which is
+   * recorded as a follow-up session before the agent starts; otherwise the session id that the
+   * agent reports is recorded when it finishes
+   */
+  newSessionId?: string;
   onLine: (line: string) => void;
 }
 
-/** What `answerThreadInBackground` reports about Claude's run. */
+/** What `answerThreadInBackground` reports about the agent's run. */
 export interface BackgroundAnswer extends BackgroundRunResult {
   /** True if the agent didn't reply via review_reply, so its final message was posted for it */
   isFallbackPosted: boolean;
 }
 
 /**
- * Runs Claude Code without a UI to answer a thread. If Claude doesn't answer by calling
+ * Runs an agent without a UI to answer a thread. If the agent doesn't answer by calling
  * review_reply, its final message (or an error note) is posted to the thread as its reply.
  */
 export async function answerThreadInBackground(request: BackgroundAnswerRequest): Promise<BackgroundAnswer> {
-  let { store, branch, threadId } = request;
+  let { store, branch, threadId, agent } = request;
   let startedAt = new Date().toISOString();
-  await recordFollowupSession(store, branch, request.newSessionId, request.cwd);
-  let result = await runClaudeInBackground(request.claude, request.args, request.cwd, request.onLine);
+  if (request.newSessionId)
+    await recordFollowupSession(store, branch, request.newSessionId, request.cwd, agent.agent);
+  let result = await runAgentInBackground(request.command, request.args, request.cwd, agent.parseOutputLine,
+    request.onLine);
+  let sessionId = result.sessionId ?? request.newSessionId;
   let isFallbackPosted = false;
   await store.updateReview(branch, review => {
     let thread = review?.threads.find(t => t.id === threadId);
     let hasAgentReplied = thread?.comments.some(c => c.author.kind === "agent" && c.createdAt >= startedAt);
+    let oldSessionCount = review?.sessions.length;
+    if (review && sessionId)
+      recordSession(review, sessionId, request.cwd, "followup", agent.agent);
     if (review && thread && !hasAgentReplied) {
-      let body = result.resultText ?? `(Claude exited with code ${result.exitCode} without answering.)`;
-      addComment(review, thread, { kind: "agent", name: request.agentName }, body,
-        result.sessionId ?? request.newSessionId);
+      let errorText = result.errorMessage ? `\n\nError: ${result.errorMessage}` : "";
+      let body = result.resultText
+        ?? `(${agent.displayName} exited with code ${result.exitCode} without answering.)${errorText}`;
+      addComment(review, thread, { kind: "agent", name: agent.authorName }, body, sessionId);
       isFallbackPosted = true;
     }
-    return isFallbackPosted ? review : undefined;
+    return isFallbackPosted || review?.sessions.length !== oldSessionCount ? review : undefined;
   });
   return { ...result, isFallbackPosted };
 }
 
 /** Records a follow-up session in a branch's review (e.g. before starting an interactive one). */
-export async function recordFollowupSession(store: ReviewStore, branch: string, sessionId: string, cwd: string)
-  : Promise<Review | undefined> {
+export async function recordFollowupSession(store: ReviewStore, branch: string, sessionId: string, cwd: string,
+  agent: AgentKind): Promise<Review | undefined> {
   return await store.updateReview(branch, review => {
     if (review)
-      recordSession(review, sessionId, cwd, "followup");
+      recordSession(review, sessionId, cwd, "followup", agent);
     return review;
   });
 }

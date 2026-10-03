@@ -94,8 +94,10 @@ function parseReview(text: string): Review {
   if (review.schemaVersion > reviewSchemaVersion)
     throw new Error(`This review was written by a newer version of Branch Review Studio `
       + `(schemaVersion ${review.schemaVersion}). Please update the extension.`);
-  // Files written by version 0.2.0 may store a ref such as `origin/develop`
-  return { ...review, baseBranch: getBaseBranchName(review.baseBranch) };
+  // Files written by version 0.2.0 may store a ref such as `origin/develop`, and files written by
+  // version 0.3.0 and earlier have only Claude Code sessions, without `agent`
+  return { ...review, baseBranch: getBaseBranchName(review.baseBranch),
+    sessions: review.sessions.map(s => ({ ...s, agent: s.agent ?? "claude" })) };
 }
 
 /** Runs `action` while holding an exclusive lock file, breaking the lock if it is stale. */

@@ -1,20 +1,38 @@
 import * as path from "node:path";
 import { createAnchor, locateAnchor } from "../core/anchoring";
+import { claudeIntegration } from "../core/claude-cli";
+import { codexIntegration } from "../core/codex-cli";
 import { getRepoRelativePath, readFileLines } from "../core/files";
 import { findMergeBase, findRepoRoot, getCurrentBranch, getGitCommonDir } from "../core/git";
 import {
-  addComment, addThread, createReview, DiffSide, getBaseBranchName, getThread, recordSession, Review, ReviewThread,
-  SessionRole, Severity, ThreadStatus,
+  addComment, addThread, AgentKind, createReview, DiffSide, getBaseBranchName, getThread, recordSession, Review,
+  ReviewThread, SessionRole, Severity, ThreadStatus,
 } from "../core/review";
 import { ReviewStore } from "../core/store";
 
-/** Who is calling the tools; `cwd` is the Claude Code session's project folder. */
+/** Who is calling the tools (see identifyCaller); `cwd` is the agent session's project folder. */
 export interface ToolCaller {
   cwd: string;
-  /** Claude Code session id (CLAUDE_CODE_SESSION_ID), if known */
+  /** Claude Code session id or Codex thread id, if known */
   sessionId: string | undefined;
+  agent: AgentKind;
   /** Author name shown on the caller's comments, e.g. "Claude" */
   agentName: string;
+}
+
+/**
+ * Identifies the agent session that calls a tool. Codex sends its thread id in every request's
+ * `_meta` (as `threadId` and in `x-codex-turn-metadata`), and calls itself "codex-mcp-client";
+ * Claude Code sets CLAUDE_CODE_SESSION_ID in the server's environment.
+ */
+export function identifyCaller(cwd: string, meta: Record<string, unknown> | undefined, env: NodeJS.ProcessEnv,
+  clientName: string | undefined): ToolCaller {
+  let turnMetadata = meta?.["x-codex-turn-metadata"] as Record<string, unknown> | undefined;
+  let codexThreadId = [meta?.threadId, turnMetadata?.thread_id].find((id): id is string => typeof id === "string");
+  return codexThreadId || clientName === "codex-mcp-client"
+    ? { cwd, sessionId: codexThreadId, agent: "codex", agentName: codexIntegration.authorName }
+    : { cwd, sessionId: env.CLAUDE_CODE_SESSION_ID || undefined, agent: "claude",
+      agentName: env.BRS_AGENT_NAME || claudeIntegration.authorName };
 }
 
 /** Arguments of review_comment. */
@@ -177,10 +195,10 @@ export class ReviewTools {
     addComment(review, thread, { kind: "agent", name: this.caller.agentName }, body, this.caller.sessionId);
   }
 
-  /** Records the caller's session if new, since `claude --resume` needs its id and cwd. */
+  /** Records the caller's session if new, since forking it needs its id and cwd. */
   private recordCaller(review: Review, role: SessionRole): void {
     if (this.caller.sessionId)
-      recordSession(review, this.caller.sessionId, this.caller.cwd, role);
+      recordSession(review, this.caller.sessionId, this.caller.cwd, role, this.caller.agent);
   }
 
   /** Formats threads as a markdown list, with all comments if `includeComments`. */

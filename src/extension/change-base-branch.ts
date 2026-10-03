@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
+import { getErrorMessage } from "../core/files";
 import { getBaseBranchChoices, listBranches } from "../core/git";
-import { BranchReviewModel, getErrorMessage } from "./model";
+import { BranchReviewModel } from "./model";
 
 interface BaseBranchPickItem extends vscode.QuickPickItem {
   name: string;
@@ -19,9 +20,19 @@ export async function changeBaseBranch(model: BranchReviewModel): Promise<void> 
     : { label: "$(git-branch) " + name, name });
   let picked = await vscode.window.showQuickPick(items, { title: "Change Base Branch",
     placeHolder: `Pick the branch to compare ${model.snapshot.branch ?? "HEAD"} against (currently ${currentBase})` });
-  if (picked && picked.name !== currentBase && await confirmIfBaseSideThreads(model, picked.name)) {
+  if (picked)
+    await changeBaseBranchIfConfirmed(model, picked.name);
+}
+
+/**
+ * Makes `newBase` the base branch of the current branch's review (see
+ * BranchReviewModel.changeBaseBranch) if it differs from the current base and the user confirms
+ * (see confirmIfBaseSideThreads). Shows any error.
+ */
+export async function changeBaseBranchIfConfirmed(model: BranchReviewModel, newBase: string): Promise<void> {
+  if (newBase !== model.baseBranch && await confirmIfBaseSideThreads(model, newBase)) {
     try {
-      await model.changeBaseBranch(picked.name);
+      await model.changeBaseBranch(newBase);
     } catch (e) {
       void vscode.window.showErrorMessage(`Could not change the base branch: ${getErrorMessage(e)}`);
     }

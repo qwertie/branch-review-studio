@@ -26,11 +26,11 @@ describe("review model", () => {
 
   it("recordSession ignores a session that is already recorded; findLatestSession finds the newest by role", () => {
     let review = createReview("b", "develop", "abc");
-    recordSession(review, "s1", "D:/x", "review");
-    recordSession(review, "s2", "D:/x", "review");
-    recordSession(review, "s1", "D:/y", "followup");
+    recordSession(review, "s1", "D:/x", "review", "claude");
+    recordSession(review, "s2", "D:/x", "review", "codex");
+    recordSession(review, "s1", "D:/y", "followup", "claude");
 
-    expect(review.sessions.map(s => s.sessionId)).toEqual(["s1", "s2"]);
+    expect(review.sessions.map(s => [s.sessionId, s.agent])).toEqual([["s1", "claude"], ["s2", "codex"]]);
     expect(findLatestSession(review, "review")?.sessionId).toBe("s2");
     expect(findLatestSession(review, "followup")).toBeUndefined();
   });

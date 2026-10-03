@@ -1,8 +1,8 @@
 {
   "name": "branch-review-studio",
   "displayName": "Branch Review Studio",
-  "description": "Review a branch's working tree against its merge-base with develop, with comment threads exchanged with Claude Code agents.",
-  "version": "0.3.0",
+  "description": "Review a branch's working tree against its merge-base with develop, with comment threads exchanged with AI agents (Claude Code, Codex).",
+  "version": "0.4.0",
   "publisher": "barreleye",
   "private": true,
   "license": "UNLICENSED",
@@ -118,18 +118,24 @@
         "icon": "$(sparkle)"
       },
       {
+        "command": "branchReviewStudio.openSettings",
+        "title": "Settings and Integrations",
+        "category": "Branch Review Studio",
+        "icon": "$(gear)"
+      },
+      {
         "command": "branchReviewStudio.installMcpServer",
-        "title": "Install MCP Server for Claude Code",
+        "title": "Install MCP Server and Skill (Claude Code, Codex)",
         "category": "Branch Review Studio"
       },
       {
         "command": "branchReviewStudio.installSkill",
-        "title": "Install Claude Skill",
+        "title": "Install Skill (Claude Code, Codex)",
         "category": "Branch Review Studio"
       },
       {
         "command": "branchReviewStudio.uninstall",
-        "title": "Uninstall MCP Server and Claude Skill",
+        "title": "Uninstall MCP Server and Skills",
         "category": "Branch Review Studio"
       }
     ],
@@ -154,6 +160,11 @@
           "command": "branchReviewStudio.refresh",
           "when": "view == branchReviewStudio.files",
           "group": "navigation@4"
+        },
+        {
+          "command": "branchReviewStudio.openSettings",
+          "when": "view == branchReviewStudio.files",
+          "group": "navigation@5"
         },
         {
           "command": "branchReviewStudio.fetchBase",
@@ -273,6 +284,11 @@
           "type": "string",
           "default": "",
           "description": "Path of the Claude Code CLI (claude.exe or claude). Empty means search PATH, then ~/.local/bin."
+        },
+        "branchReviewStudio.codexPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path of the Codex CLI (codex.exe or codex). Empty means the CLI bundled with the OpenAI Codex VS Code extension (openai.chatgpt) if it is installed, else codex on PATH."
         }
       }
     }

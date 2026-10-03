@@ -1,8 +1,9 @@
 import * as vscode from "vscode";
 import { AnchorLocation, createAnchor } from "../core/anchoring";
+import { getErrorMessage } from "../core/files";
 import { addComment, addThread, DiffSide, getAuthorLabel, getThread, ReviewThread, ThreadStatus } from "../core/review";
 import { baseScheme, getBaseUri, parseBaseUri } from "./base-content";
-import { BranchReviewModel, getErrorMessage, ReviewSnapshot } from "./model";
+import { BranchReviewModel, ReviewSnapshot } from "./model";
 
 /** Id of the CommentController, which package.json menus test (`commentController == ...`). */
 const controllerId = "branch-review-studio";

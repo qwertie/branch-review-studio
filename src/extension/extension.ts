@@ -1,15 +1,19 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { getErrorMessage } from "../core/files";
 import { findRepoRoot, getGitCommonDir, getGitDir } from "../core/git";
+import { IntegrationErrorLog } from "../core/integration-status";
 import { ReviewStore } from "../core/store";
+import { AgentServices } from "./agents";
 import { askAgent } from "./ask-agent";
 import { BaseContentProvider, baseScheme } from "./base-content";
 import { changeBaseBranch } from "./change-base-branch";
 import { ReviewCommentController } from "./comments";
 import { fetchBase, openAllChanges, openFileDiff, openThread } from "./diff-commands";
 import { installMcpServer, installSkill, uninstall, updateInstalledServerIfOutdated } from "./install";
-import { BranchReviewModel, getErrorMessage } from "./model";
+import { BranchReviewModel } from "./model";
 import { ReviewTreeNode, ReviewTreeProvider } from "./review-tree";
+import { SettingsPanel } from "./settings-panel";
 import { switchBranch } from "./switch-branch";
 
 /** What `activate` returns; scripts/smoke-test.ts uses it to inspect the extension's state. */
@@ -24,18 +28,20 @@ export interface BranchReviewStudioExports {
 export async function activate(context: vscode.ExtensionContext): Promise<BranchReviewStudioExports> {
   let log = vscode.window.createOutputChannel("Branch Review Studio");
   context.subscriptions.push(log);
-  registerInstallCommands(context, log);
+  let services: AgentServices = { context, log,
+    errors: new IntegrationErrorLog(context.globalState, () => SettingsPanel.renderIfOpen()) };
   void updateInstalledServerIfOutdated(context, log).catch(e => log.appendLine(getErrorMessage(e)));
   let model = await createModel(log);
+  registerRepoIndependentCommands(services, model);
   if (model === undefined) {
-    registerCommands(context, undefined, log);
+    registerCommands(context, undefined, services);
   } else {
     let comments = new ReviewCommentController(model);
     let tree = new ReviewTreeProvider(model);
     context.subscriptions.push(model, comments, tree,
       vscode.window.registerTreeDataProvider("branchReviewStudio.files", tree),
       vscode.workspace.registerTextDocumentContentProvider(baseScheme, new BaseContentProvider()));
-    registerCommands(context, model, log, comments);
+    registerCommands(context, model, services, comments);
     await watchForChanges(context, model);
     await model.refresh();
   }
@@ -57,16 +63,17 @@ async function createModel(log: vscode.OutputChannel): Promise<BranchReviewModel
 }
 
 /** Registers commands that work without a git repo. */
-function registerInstallCommands(context: vscode.ExtensionContext, log: vscode.OutputChannel): void {
-  context.subscriptions.push(
-    vscode.commands.registerCommand("branchReviewStudio.installMcpServer", () => installMcpServer(context, log)),
-    vscode.commands.registerCommand("branchReviewStudio.installSkill", () => installSkill(context)),
-    vscode.commands.registerCommand("branchReviewStudio.uninstall", () => uninstall(log)));
+function registerRepoIndependentCommands(services: AgentServices, model: BranchReviewModel | undefined): void {
+  services.context.subscriptions.push(
+    vscode.commands.registerCommand("branchReviewStudio.installMcpServer", () => installMcpServer(services)),
+    vscode.commands.registerCommand("branchReviewStudio.installSkill", () => installSkill(services.context)),
+    vscode.commands.registerCommand("branchReviewStudio.uninstall", () => uninstall(services)),
+    vscode.commands.registerCommand("branchReviewStudio.openSettings", () => SettingsPanel.show(model, services)));
 }
 
 /** Registers commands that need a git repo; without one (`model` undefined), they show an error. */
 function registerCommands(context: vscode.ExtensionContext, model: BranchReviewModel | undefined,
-  log: vscode.OutputChannel, comments?: ReviewCommentController): void {
+  services: AgentServices, comments?: ReviewCommentController): void {
   let commands: Record<string, (model: BranchReviewModel, ...args: never[]) => unknown> = {
     refresh: m => m.refresh(),
     openAllChanges,
@@ -85,7 +92,7 @@ function registerCommands(context: vscode.ExtensionContext, model: BranchReviewM
     resolveThread: (_, thread: vscode.CommentThread) => comments?.setThreadStatus(thread, "resolved"),
     unresolveThread: (_, thread: vscode.CommentThread) => comments?.setThreadStatus(thread, "open"),
     deleteThread: (_, thread: vscode.CommentThread) => comments?.deleteThread(thread),
-    askAgent: (m, reply: vscode.CommentReply) => comments && askAgent(m, comments, reply, log),
+    askAgent: (m, reply: vscode.CommentReply) => comments && askAgent(m, comments, reply, services),
   };
   for (let [name, handler] of Object.entries(commands)) {
     context.subscriptions.push(vscode.commands.registerCommand(`branchReviewStudio.${name}`, (...args: never[]) =>

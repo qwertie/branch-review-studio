@@ -46,3 +46,8 @@ export function getRepoRelativePath(repoRoot: string, fullPath: string): string 
 export function getErrorCode(e: unknown): string | undefined {
   return e instanceof Error && "code" in e && typeof e.code === "string" ? e.code : undefined;
 }
+
+/** Gets the message of an error, or the string form of a non-Error value. */
+export function getErrorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}

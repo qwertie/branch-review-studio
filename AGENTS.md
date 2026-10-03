@@ -3,21 +3,23 @@
 Sections below marked (verbatim) are copied from Barreleye's AGENTS.md.
 
 This repo contains Branch Review Studio, a per-user tool for reviewing a branch before it is merged,
-with comment threads exchanged with AI agents (Claude Code). It has three parts:
+with comment threads exchanged with AI agents (Claude Code or Codex). It has three parts:
 
 1. src/extension/ (VS Code extension): tree view of changed files vs. the merge-base with the base
-   branch, diff editors, comment threads (Comments API), branch/worktree switching, and commands
-   that send thread messages to Claude Code.
+   branch, diff editors, comment threads (Comments API), branch/worktree switching, a settings and
+   status panel, and commands that send thread messages to an agent ("Ask Agent").
 2. src/mcp/ (stdio MCP server): tools (`review_begin`, `review_comment`, `review_reply`, ...) that
-   let Claude Code post review threads into the review store.
-3. skills/branch-review-studio/ (Claude skill): tells agents how to use the MCP tools.
+   let agents post review threads into the review store.
+3. skills/branch-review-studio/ (agent skill): the branch review procedure, which posts findings
+   with the MCP tools.
 
 src/core/ holds the logic shared by the extension and the MCP server (git, review store, anchoring,
-Claude CLI invocations). It must not import `vscode`, and it is unit-tested with vitest.
+agent CLI invocations behind `AgentIntegration`). It must not import `vscode`, and it is
+unit-tested with vitest.
 
 Encapsulation rule: nothing in the user's repos may depend on this tool. It writes only to
 `<git-common-dir>/branch-review-studio/` (which git ignores), to `~/.branch-review-studio/`, and to
-user-level Claude Code config when the user runs an install command.
+user-level Claude Code / Codex config and skill folders when the user runs an install command.
 
 Read .claude/skills/barreleye-programming-process/SKILL.md ("BPP") before writing code.
 

@@ -1,7 +1,7 @@
 import * as os from "node:os";
 import * as vscode from "vscode";
 import { AnchorLocation, locateAnchor, splitLines } from "../core/anchoring";
-import { getFullPath, getRepoRelativePath, readFileLines } from "../core/files";
+import { getErrorMessage, getFullPath, getRepoRelativePath, readFileLines } from "../core/files";
 import {
   ChangedFile, findMergeBase, getChangedFiles, getConfigValue, getCurrentBranch, MergeBaseInfo,
 } from "../core/git";
@@ -173,9 +173,5 @@ export class BranchReviewModel implements vscode.Disposable {
     return review?.baseBranch || vscode.workspace.getConfiguration("branchReviewStudio").get<string>("baseBranch")
       || "develop";
   }
-}
-
-export function getErrorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }
 

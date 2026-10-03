@@ -216,3 +216,50 @@ Assumptions made without asking: the choice is stored in the branch's review, ne
 only branches that are local or on `origin` are offered; arbitrary refs can't be typed; when no
 merge-base exists, clicking the header row opens Change Base Branch; Fetch Base Branch now also
 stores the new merge-base in an existing review (second-pass finding F3).
+
+## S6. Follow-up: Codex, settings panel, full review skill
+
+### User (abridged only where it repeats research results)
+
+> it sounds like the Claude Code extension is not possible to fully integrate with our extension (I
+> want replies by the Claude to go into the code review). I just installed the Codex extension into
+> my VS Code, and my proposal is to integrate our new extension with that not with the ChatGPT
+> desktop app. Or integrate with the Codex CLI if the extension is not easy to integrate with. I
+> don't care what order you add the integrations in, but since we will have multiple integrations,
+> add a configuration button to our new sidebar that will show a modal to let the user select a
+> base branch and also see the status of the integrations (for each supported integration, show
+> whether it is apparently available and, if an error occurred during the last attempt to use an
+> integration, the error should be shown there)
+
+> I intended for the diff to be the working tree versus a base branch. I don't see how it could
+> work any other way because the code review window is supposed to allow the user to edit code.
+> Are you saying that's not how it works? Because I am allowed to edit in the combined diff view
+
+> oh I am reluctant to change the skill in Barreleye itself, but it's okay, don't revert. isn't
+> there a version of the skill in the extensions folder? Now that I think about it, the
+> configuration modal I requested should explain at the top how to do a code review that is
+> connected with the extension
+
+> I want the branch-review skill in the extension's folder to be full-featured and based mainly on
+> the barreleye one. However the fan-out thing is expensive in tokens I would like a version of
+> the skill that only does the fan-out if requested by the user includes an instruction like "use
+> multiple sub-agents" or "be thorough" or "be comprehensive". The default code review skill
+> (which I think is called /review?) Does a pretty good job and so what I really want is a version
+> of the skill that combines the best of both that doesn't fan-out by default (unless the default
+> one does?)
+
+Research findings that shaped the plan: `vscode.lm` models need API keys or Copilot, never a
+Claude Code or ChatGPT subscription; the Claude Code extension exports no API and its documented
+`vscode://anthropic.claude-code/open` link can't fork or auto-send; the Codex extension can't
+start a thread with a prompt but can open one by id (`vscode://openai.chatgpt/local/<threadId>`);
+the Codex CLI supports true forks and MCP; Claude Code's `/review` is an alias of `/code-review`,
+which (with Opus) fans out to subagents only at `max` effort.
+
+Decisions and assumptions (not asked): Codex runs through the Codex CLI (preferring the CLI bundled
+with the Codex extension); the "modal" is a webview tab because VS Code has no rich modals; Codex
+runs pre-approve only this tool's MCP server via `-c` overrides; Install copies the skill to
+`~/.claude/skills/` and `~/.agents/skills/`; Barreleye's `/branch-review` Step 3 now diffs the
+working tree (uncommitted in Barreleye).
+
+Unanswered: whether Install should add `default_tools_approval_mode = "approve"` for this server
+to `~/.codex/config.toml`.

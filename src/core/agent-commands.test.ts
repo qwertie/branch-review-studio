@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildClaudeArgs, buildThreadPrompt, mcpServerName } from "./agent-commands";
+import { AgentChoice, buildReviewPrompt, buildThreadPrompt, getAgentChoices, mcpServerName } from "./agent-commands";
 import { createAnchor, splitLines } from "./anchoring";
 import { addComment, addThread, createReview } from "./review";
 
@@ -51,28 +51,32 @@ describe("buildThreadPrompt", () => {
   });
 });
 
-describe("buildClaudeArgs", () => {
-  it("resumes and forks the review session in an interactive terminal", () => {
-    let args = buildClaudeArgs({ prompt: "hi\nthere", sessionMode: "fork", resumeSessionId: "s-1",
-      runMode: "interactive" });
-    expect(args).toEqual(["--allowedTools", `mcp__${mcpServerName}`, "--resume", "s-1", "--fork-session",
-      "hi\nthere"]);
-  });
+describe("getAgentChoices", () => {
+  const describeChoices = (choices: AgentChoice[]) => choices.map(c => `${c.agent} ${c.sessionMode} ${c.runMode}`);
 
-  it("starts a fresh print-mode session with stream-json output that may call the MCP tools", () => {
-    // --allowedTools takes a variable number of values, so it must not come right before the prompt
-    expect(buildClaudeArgs({ prompt: "hi", sessionMode: "fresh", runMode: "background" })).toEqual([
-      "--allowedTools", `mcp__${mcpServerName}`, "-p", "--output-format", "stream-json", "--verbose", "hi",
+  it("offers forking only with the agent that ran the review session, and lists that agent first", () => {
+    expect(describeChoices(getAgentChoices(["claude", "codex"], "codex"))).toEqual([
+      "codex fork interactive", "codex fork background", "codex fresh interactive", "codex fresh background",
+      "claude fresh interactive", "claude fresh background",
     ]);
   });
 
-  it("forks in the background with a preassigned id for the new session", () => {
-    let args = buildClaudeArgs({ prompt: "hi", sessionMode: "fork", resumeSessionId: "s-1", newSessionId: "s-2",
-      runMode: "background" });
-    expect(args.slice(-6)).toEqual(["--resume", "s-1", "--fork-session", "--session-id", "s-2", "hi"]);
+  it("offers only fresh sessions without a review session or when the session's agent is unavailable", () => {
+    expect(describeChoices(getAgentChoices(["claude", "codex"], undefined))).toEqual([
+      "claude fresh interactive", "claude fresh background", "codex fresh interactive", "codex fresh background",
+    ]);
+    expect(describeChoices(getAgentChoices(["codex"], "claude")))
+      .toEqual(["codex fresh interactive", "codex fresh background"]);
   });
+});
 
-  it("refuses to fork without a session id", () => {
-    expect(() => buildClaudeArgs({ prompt: "hi", sessionMode: "fork", runMode: "interactive" })).toThrow();
+describe("buildReviewPrompt", () => {
+  it("names the branch, the base branch and the review tools", () => {
+    let prompt = buildReviewPrompt("feature/x", "develop");
+
+    expect(prompt).toContain("branch `feature/x`, following the " + mcpServerName + " skill if you have it");
+    expect(prompt).toContain("`" + mcpServerName + "` MCP tools");
+    expect(prompt).toContain('review_begin with baseBranch "develop"');
+    expect(prompt).toMatch(/review_comment.*review_finish/);
   });
 });

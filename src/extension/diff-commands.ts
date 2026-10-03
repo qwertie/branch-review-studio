@@ -1,8 +1,9 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { getErrorMessage } from "../core/files";
 import { ChangedFile, fetchBranch } from "../core/git";
 import { getBaseUri } from "./base-content";
-import { BranchReviewModel, getErrorMessage } from "./model";
+import { BranchReviewModel } from "./model";
 
 /** Opens all changed files in VS Code's multi-diff editor ("changes" editor). */
 export async function openAllChanges(model: BranchReviewModel): Promise<void> {

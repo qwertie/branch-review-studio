@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { getGitCommonDir } from "../core/git";
 import { ReviewStore } from "../core/store";
 import { TempRepo } from "../core/test-helpers";
-import { ReviewTools } from "./review-tools";
+import { AgentKind } from "../core/review";
+import { identifyCaller, ReviewTools } from "./review-tools";
 
 let repos: TempRepo[] = [];
 afterEach(() => {
@@ -21,8 +22,8 @@ function createFeatureRepo(): TempRepo {
   return repo;
 }
 
-function createTools(repo: TempRepo, sessionId = "session-1"): ReviewTools {
-  return new ReviewTools({ cwd: repo.root, sessionId, agentName: "Claude" });
+function createTools(repo: TempRepo, sessionId = "session-1", agent: AgentKind = "claude"): ReviewTools {
+  return new ReviewTools({ cwd: repo.root, sessionId, agent, agentName: agent === "claude" ? "Claude" : "Codex" });
 }
 
 async function readReview(repo: TempRepo) {
@@ -87,15 +88,15 @@ describe("ReviewTools", () => {
     let repo = createFeatureRepo();
     await createTools(repo).addReviewComment({ file: "src/a.ts", line: 3, severity: "Major", body: "Why 2?" });
     let threadId = (await readReview(repo)).threads[0].id;
-    let followUp = createTools(repo, "session-2");
+    let followUp = createTools(repo, "thread-2", "codex");
 
     await followUp.replyToThread({ threadId, body: "Because." });
-    expect(await followUp.listThreads({})).toMatch(/Why 2\?[\s\S]*Claude: Because\./);
+    expect(await followUp.listThreads({})).toMatch(/Why 2\?[\s\S]*Codex: Because\./);
     await followUp.resolveThread({ threadId, note: "Fixed." });
 
     let review = await readReview(repo);
-    expect(review.sessions.map(s => [s.sessionId, s.role]))
-      .toEqual([["session-1", "review"], ["session-2", "followup"]]);
+    expect(review.sessions.map(s => [s.sessionId, s.role, s.agent]))
+      .toEqual([["session-1", "review", "claude"], ["thread-2", "followup", "codex"]]);
     expect(review.threads[0].status).toBe("resolved");
     expect(review.threads[0].comments.map(c => c.body)).toEqual(["Why 2?", "Because.", "Fixed."]);
     expect(await followUp.listThreads({})).toBe("There are no open threads.");
@@ -111,5 +112,24 @@ describe("ReviewTools", () => {
     await tools.beginReview({});
     expect(await tools.finishReview({ summary: "All good." })).toContain("0 open threads");
     expect((await readReview(repo)).summary).toBe("All good.");
+  });
+});
+
+describe("identifyCaller", () => {
+  it("identifies Codex by the thread id in the request's _meta, or by its client name", () => {
+    // _meta of a real tools/call request from codex-cli 0.160.0 (abridged)
+    let meta = { "x-codex-turn-metadata": { session_id: "t-1", thread_id: "t-1", turn_id: "u-1" }, threadId: "t-1",
+      sessionId: "t-1" };
+    expect(identifyCaller("D:/r", meta, { CLAUDE_CODE_SESSION_ID: "c-1" }, "codex-mcp-client"))
+      .toEqual({ cwd: "D:/r", sessionId: "t-1", agent: "codex", agentName: "Codex" });
+    expect(identifyCaller("D:/r", { "x-codex-turn-metadata": { thread_id: "t-2" } }, {}, undefined))
+      .toMatchObject({ sessionId: "t-2", agent: "codex" });
+    expect(identifyCaller("D:/r", undefined, {}, "codex-mcp-client"))
+      .toMatchObject({ sessionId: undefined, agent: "codex" });
+  });
+
+  it("identifies Claude Code by CLAUDE_CODE_SESSION_ID otherwise", () => {
+    expect(identifyCaller("D:/r", { progressToken: 1 }, { CLAUDE_CODE_SESSION_ID: "c-1" }, "claude-code"))
+      .toEqual({ cwd: "D:/r", sessionId: "c-1", agent: "claude", agentName: "Claude" });
   });
 });

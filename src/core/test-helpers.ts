@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { onTestFinished } from "vitest";
 
 /** A throwaway git repository in the OS temp folder, used by tests that need real git. */
 export class TempRepo {
@@ -46,6 +47,21 @@ export class TempRepo {
     for (let p of [this.root, ...extraPaths])
       fs.rmSync(p, { recursive: true, force: true, maxRetries: 3 });
   }
+}
+
+/**
+ * Creates files with the given content (paths relative to a new temp folder, which is deleted when
+ * the current test finishes) and returns the folder.
+ */
+export function createFiles(...files: (string | [relativePath: string, text: string])[]): string {
+  let dir = createTempDir();
+  onTestFinished(() => fs.rmSync(dir, { recursive: true, force: true }));
+  for (let file of files) {
+    let [relativePath, text] = typeof file === "string" ? [file, ""] : file;
+    fs.mkdirSync(path.dirname(path.join(dir, relativePath)), { recursive: true });
+    fs.writeFileSync(path.join(dir, relativePath), text);
+  }
+  return dir;
 }
 
 /** Creates an empty folder in the OS temp folder. */

@@ -1,11 +1,12 @@
-// Stdio MCP server through which Claude Code writes Branch Review Studio reviews. Claude Code
-// starts it in the session's project folder; the review belongs to the branch checked out there.
+// Stdio MCP server through which agents (Claude Code, Codex) write Branch Review Studio reviews.
+// The agent starts it in the session's project folder; the review belongs to the branch checked out
+// there.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { mcpServerName } from "../core/agent-commands";
 import { severities } from "../core/review";
-import { ReviewTools } from "./review-tools";
+import { identifyCaller, ReviewTools } from "./review-tools";
 
 /** package.json's version, which esbuild.mjs substitutes at build time */
 declare const EXTENSION_VERSION: string;
@@ -13,9 +14,11 @@ declare const EXTENSION_VERSION: string;
 void main();
 
 async function main(): Promise<void> {
-  let tools = new ReviewTools({ cwd: process.cwd(), sessionId: process.env.CLAUDE_CODE_SESSION_ID || undefined,
-    agentName: process.env.BRS_AGENT_NAME || "Claude" });
   let server = new McpServer({ name: mcpServerName, version: EXTENSION_VERSION });
+  /** Runs a tool as the agent session identified by the request */
+  let runTool = (extra: { _meta?: Record<string, unknown> }, action: (tools: ReviewTools) => Promise<string>) =>
+    runToolCore(() => action(new ReviewTools(identifyCaller(process.cwd(), extra._meta, process.env,
+      server.server.getClientVersion()?.name))));
 
   server.registerTool("review_begin", {
     description: "Starts (or resumes) the Branch Review Studio review of the git branch checked out in this "
@@ -27,7 +30,7 @@ async function main(): Promise<void> {
       baseBranch: z.string().optional()
         .describe("Branch to compare against; default: the existing review's base, else 'develop'"),
     },
-  }, args => runTool(() => tools.beginReview(args)));
+  }, (args, extra) => runTool(extra, tools => tools.beginReview(args)));
 
   server.registerTool("review_comment", {
     description: "Posts one review finding as a new comment thread in Branch Review Studio. Line numbers are "
@@ -41,7 +44,7 @@ async function main(): Promise<void> {
       severity: z.enum(severities).describe("Critical, Major, Minor or Note"),
       body: z.string().describe("Markdown: the finding and its concrete consequence"),
     },
-  }, args => runTool(() => tools.addReviewComment(args)));
+  }, (args, extra) => runTool(extra, tools => tools.addReviewComment(args)));
 
   server.registerTool("review_reply", {
     description: "Replies in an existing Branch Review Studio comment thread (e.g. to answer the developer).",
@@ -49,7 +52,7 @@ async function main(): Promise<void> {
       threadId: z.string(),
       body: z.string().describe("Markdown reply"),
     },
-  }, args => runTool(() => tools.replyToThread(args)));
+  }, (args, extra) => runTool(extra, tools => tools.replyToThread(args)));
 
   server.registerTool("review_resolve", {
     description: "Marks a Branch Review Studio thread resolved, optionally with a closing note.",
@@ -57,25 +60,25 @@ async function main(): Promise<void> {
       threadId: z.string(),
       note: z.string().optional().describe("Markdown note added to the thread before resolving"),
     },
-  }, args => runTool(() => tools.resolveThread(args)));
+  }, (args, extra) => runTool(extra, tools => tools.resolveThread(args)));
 
   server.registerTool("review_list", {
     description: "Lists the threads (with all comments and current line numbers) of this branch's review.",
     inputSchema: {
       status: z.enum(["open", "resolved", "all"]).optional().describe("Default 'open'"),
     },
-  }, args => runTool(() => tools.listThreads(args)));
+  }, (args, extra) => runTool(extra, tools => tools.listThreads(args)));
 
   server.registerTool("review_finish", {
     description: "Saves the overall review summary (markdown) after all findings are posted.",
     inputSchema: { summary: z.string() },
-  }, args => runTool(() => tools.finishReview(args)));
+  }, (args, extra) => runTool(extra, tools => tools.finishReview(args)));
 
   await server.connect(new StdioServerTransport());
 }
 
 /** Converts a tool's result or error into an MCP tool result. */
-async function runTool(action: () => Promise<string>) {
+async function runToolCore(action: () => Promise<string>) {
   try {
     return { content: [{ type: "text" as const, text: await action() }] };
   } catch (e) {

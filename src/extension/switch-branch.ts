@@ -1,8 +1,9 @@
 import * as vscode from "vscode";
+import { getErrorMessage } from "../core/files";
 import {
   addWorktree, BranchInfo, getDefaultWorktreePath, listBranches, listWorktrees, WorktreeInfo,
 } from "../core/git";
-import { BranchReviewModel, getErrorMessage } from "./model";
+import { BranchReviewModel } from "./model";
 
 interface BranchPickItem extends vscode.QuickPickItem {
   branch: BranchInfo;

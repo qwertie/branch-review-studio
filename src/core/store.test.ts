@@ -97,6 +97,15 @@ describe("ReviewStore", () => {
     expect((await store.readReview("b"))?.baseBranch).toBe("develop");
   });
 
+  it("assumes that sessions recorded without an agent (by version 0.3.0) are Claude Code sessions", async () => {
+    let store = createStore();
+    await store.ensureExists();
+    let oldReview = { ...createReview("b", "develop", "abc"),
+      sessions: [{ sessionId: "s1", cwd: "D:/x", role: "review", createdAt: "2026-01-01T00:00:00Z" }] };
+    fs.writeFileSync(store.getReviewPath("b"), JSON.stringify(oldReview));
+    expect((await store.readReview("b"))?.sessions[0].agent).toBe("claude");
+  });
+
   it("refuses to read a review written by a newer schema version", async () => {
     let store = createStore();
     await store.ensureExists();
