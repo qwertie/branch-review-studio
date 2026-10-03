@@ -1,12 +1,16 @@
 // Runs scripts/smoke-test.ts in the installed VS Code with a throwaway profile, against the repo
-// given as the first argument (default D:\brs-sandbox\Barreleye). Usage: npm run smoke-test -- <repo>
+// given as the first argument or in BRS_SMOKE_REPO. Usage: npm run smoke-test -- <repo>
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as esbuild from "esbuild";
 
-let repo = process.argv[2] ?? "D:\\brs-sandbox\\Barreleye";
+let repo = process.argv[2] ?? process.env.BRS_SMOKE_REPO;
+if (!repo) {
+  console.error("Usage: npm run smoke-test -- <repo> (or set BRS_SMOKE_REPO)");
+  process.exit(2);
+}
 let root = path.resolve(import.meta.dirname, "..");
 spawnSync(process.execPath, [path.join(root, "esbuild.mjs")], { cwd: root, stdio: "inherit" });
 await esbuild.build({ entryPoints: [path.join(root, "scripts/smoke-test.ts")], bundle: true, platform: "node",

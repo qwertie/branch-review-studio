@@ -8,7 +8,7 @@ abridged where noted.
 
 ### User (message 1)
 
-> [screenshot of Visual Studio's sticky scroll: `namespace Barreleye.DbEntities` / `public class
+> [screenshot of Visual Studio's sticky scroll: `namespace MainRepo.DbEntities` / `public class
 > EntityDBO : PieceOfScenarioWithColor,` / `public void Assign(EntityDBO other)` pinned above
 > lines 421–423]
 >
@@ -89,8 +89,8 @@ comments together; unstable T3 API; MCP loading in T3-spawned sessions; comment 
 >
 > I like the idea of a VS Code extension. The extension should be implemented in TypeScript,
 > right? It's probably best if you hand off the work to a sub-agent so that your own context stays
-> cleaner. Let's see how practical this is: please build it. Follow the Barreleye Programming
-> Process (D:\Barreleye\.cursor\skills\barreleye-programming-process\SKILL.md) and Barreleye
+> cleaner. Let's see how practical this is: please build it. Follow the MainRepo Programming
+> Process (D:\MainRepo\.cursor\skills\mainrepo-programming-process\SKILL.md) and MainRepo
 > AGENTS.md to the extent they are applicable to this new extension. Make a new repo that includes
 > verbatim parts from those files that are relevant to the extension.
 >
@@ -122,15 +122,15 @@ comments together; unstable T3 API; MCP loading in T3-spawned sessions; comment 
   with a checkpoint after A; T3 adapter later.
 - Q3. How should forked sessions run? **Answer:** "Both, chosen per message" (default interactive
   terminal, with a background option).
-- Q4. May the subagent edit Barreleye's `branch-review.md`? **Answer:** "probably both―We need a way
+- Q4. May the subagent edit MainRepo's `branch-review.md`? **Answer:** "probably both―We need a way
   for the extension to be conveniently used in different projects, but hooking it into the
-  existing branch review makes sense for Barreleye in particular" → generic skill in this repo plus
-  an uncommitted conditional hook in Barreleye.
+  existing branch review makes sense for MainRepo in particular" → generic skill in this repo plus
+  an uncommitted conditional hook in MainRepo.
 - Q5 (after Phase A checkpoint). Continue with B and C? **Answer:** "yes, continue B and C. I will
   read your message up above in the meantime."
 - Q6. Build a generated `.code-workspace` so inline diff applies only to review windows?
   **Unanswered** — not built.
-- Q7. Change Barreleye `/branch-review` Step 3 to diff the working tree (`git diff $MERGE_BASE`)
+- Q7. Change MainRepo `/branch-review` Step 3 to diff the working tree (`git diff $MERGE_BASE`)
   instead of `$MERGE_BASE..HEAD`? **Unanswered** — not changed.
 
 ## S3. Assumptions made without the user's confirmation
@@ -141,13 +141,13 @@ comments together; unstable T3 API; MCP loading in T3-spawned sessions; comment 
   `diffEditor.renderSideBySide`; the README tells users to pick Inline View themselves.
 - A3. Sessions started by Ask Agent pre-approve only this tool's MCP tools
   (`--allowedTools mcp__branch-review-studio`) so replying to a thread doesn't prompt.
-- A4. The Barreleye hook posts findings to Branch Review Studio without asking, because posting is
+- A4. The MainRepo hook posts findings to Branch Review Studio without asking, because posting is
   local.
 - A5. Worktrees are created under a sibling folder `<repoName>.worktrees/<branch>` (setting
   `branchReviewStudio.worktreeRoot`).
 - A6. The MCP server is registered for the user (`claude mcp add --scope user`) with a stable copy
   at `~/.branch-review-studio/mcp-server.js`; `node` must be on PATH.
-- A7. The provenance note names the tool and extension id (`barreleye.branch-review-studio`) rather
+- A7. The provenance note names the tool and extension id (`mainrepo.branch-review-studio`) rather
   than a local repo path, so it is correct on coworkers' machines.
 - A8. Fork options are hidden when the review session's folder no longer exists, because
   `claude --resume` finds sessions by project folder.
@@ -235,13 +235,13 @@ stores the new merge-base in an existing review (second-pass finding F3).
 > work any other way because the code review window is supposed to allow the user to edit code.
 > Are you saying that's not how it works? Because I am allowed to edit in the combined diff view
 
-> oh I am reluctant to change the skill in Barreleye itself, but it's okay, don't revert. isn't
+> oh I am reluctant to change the skill in MainRepo itself, but it's okay, don't revert. isn't
 > there a version of the skill in the extensions folder? Now that I think about it, the
 > configuration modal I requested should explain at the top how to do a code review that is
 > connected with the extension
 
 > I want the branch-review skill in the extension's folder to be full-featured and based mainly on
-> the barreleye one. However the fan-out thing is expensive in tokens I would like a version of
+> the mainrepo one. However the fan-out thing is expensive in tokens I would like a version of
 > the skill that only does the fan-out if requested by the user includes an instruction like "use
 > multiple sub-agents" or "be thorough" or "be comprehensive". The default code review skill
 > (which I think is called /review?) Does a pretty good job and so what I really want is a version
@@ -258,8 +258,8 @@ which (with Opus) fans out to subagents only at `max` effort.
 Decisions and assumptions (not asked): Codex runs through the Codex CLI (preferring the CLI bundled
 with the Codex extension); the "modal" is a webview tab because VS Code has no rich modals; Codex
 runs pre-approve only this tool's MCP server via `-c` overrides; Install copies the skill to
-`~/.claude/skills/` and `~/.agents/skills/`; Barreleye's `/branch-review` Step 3 now diffs the
-working tree (uncommitted in Barreleye).
+`~/.claude/skills/` and `~/.agents/skills/`; MainRepo's `/branch-review` Step 3 now diffs the
+working tree (uncommitted in MainRepo).
 
 Unanswered: whether Install should add `default_tools_approval_mode = "approve"` for this server
 to `~/.codex/config.toml`.
@@ -279,7 +279,7 @@ to `~/.codex/config.toml`.
 
 The assistant pointed out that a group's diff can show only that group's changes by serving a
 synthetic left side (merge-base plus other groups' changes) while the right side stays the real,
-editable file. Answers: "Only that group's changes"; thresholds "meet EITHER"; for Barreleye: "I'd
+editable file. Answers: "Only that group's changes"; thresholds "meet EITHER"; for MainRepo: "I'd
 like the branch-review command to have only minor changes. It should tell the agent to do this by
 pointing it at another file or command" (so the Step 8 hook became a two-line pointer to the
 instructions `review_begin` returns).
