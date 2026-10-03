@@ -146,8 +146,8 @@ export class ReviewTools {
       review.changeGroups = changeGroups;
     });
     let layout = arrangeGroups(changeGroups, changedFiles.map(f => f.path), mergeBaseSha);
-    let groupLines = layout.groups.map(g => `- ${g.name} (${describeGroupSize(g)}): `
-      + g.files.map(f => f.path + (f.isPartial ? " (partial)" : "")).join(", "));
+    let groupLines = layout.groups.map(g => `- ${g.name} (${describeGroupSize(g)})`
+      + (g.files.length > 0 ? ": " + g.files.map(f => f.path + (f.isPartial ? " (partial)" : "")).join(", ") : ""));
     let result = "Saved the groups. Branch Review Studio shows them smallest first:\n" + groupLines.join("\n");
     return notes.length === 0 ? result : result + "\n\nTo correct the following, call review_set_groups again "
       + "(it replaces the groups):\n" + notes.map(n => `- ${n}`).join("\n");

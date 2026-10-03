@@ -173,7 +173,10 @@ A review can divide the branch's changes into groups of related changes, e.g. "F
   lines in the group's hunks (per hunk, the larger of its removed and added line counts, so a
   modified line counts once). Changed files that no group includes (e.g. files changed after the groups were
   posted) and unchanged files with threads are listed last, under **Ungrouped**. Grouped files
-  that are no longer changed are hidden. Without groups, the tree lists the files by path.
+  that are no longer changed are hidden; a group left with no changes still appears (as "no
+  changes", sorted first), so that a grouping mistake stands out. `review_set_groups` also tells
+  the agent about changed files it put in no group. Without groups, the tree lists the files by
+  path.
 - **Diffs:** clicking a group opens its files in a multi-diff editor titled with the group's name;
   clicking a file under a group opens that group's view of the file. In a group's view, the left
   side is the merge-base version with the hunks that belong only to other groups applied, so the

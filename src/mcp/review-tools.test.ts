@@ -136,12 +136,13 @@ describe("ReviewTools", () => {
         ] },
       ] });
       expect(result).toBe("Saved the groups. Branch Review Studio shows them smallest first:\n"
+        + "- Unused (no changes)\n"
         + "- New file b (1 line, 1 file): src/b.ts (partial)\n"
         + "- Return 2 (2 lines, 2 files): src/a.ts, src/b.ts (partial)\n\n"
         + "To correct the following, call review_set_groups again (it replaces the groups):\n"
         + "- src/b.ts: the range 9-9 of group 'b' overlaps no change.\n"
         + "- src/b.ts: no range covers line 3, so these changes appear in every group that lists the file.\n"
-        + "- Group 'c' includes no changes, so Branch Review Studio doesn't show it.");
+        + "- Group 'c' includes no changes, so Branch Review Studio shows it without files.");
 
       await tools.setGroups({ groups: [groups[1]], files: [{ file: "src/b.ts", groups: [{ groupId: "b" }] }] });
       expect((await readReview(repo)).changeGroups).toMatchObject({ groups: [groups[1]],
@@ -163,6 +164,18 @@ describe("ReviewTools", () => {
     let review = await readReview(repo);
     expect(review.mergeBaseSha).toBe(repo.git("rev-parse", "HEAD"));
     expect(review.changeGroups?.mergeBaseSha).toBe(review.mergeBaseSha);
+  });
+
+  it("setGroups tells the agent about changed files that it put in no group", async () => {
+    let repo = createFeatureRepo();
+    repo.writeFiles({ "src/b.ts": "b\n" });
+
+    let result = await createTools(repo).setGroups({ groups: [{ id: "a", name: "A", summary: "" }],
+      files: [{ file: "src/a.ts", groups: [{ groupId: "a" }] }] });
+
+    expect(result).toContain("- Ungrouped (1 file): src/b.ts\n");
+    expect(result).toContain("- These changed files are in no group, so Branch Review Studio lists them under "
+      + "Ungrouped: src/b.ts");
   });
 
   it("setGroups rejects invalid groups and files, listing every problem, and saves nothing", async () => {

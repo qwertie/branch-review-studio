@@ -121,12 +121,14 @@ describe("arrangeGroups", () => {
   const describeLayout = (layout: ReturnType<typeof arrangeGroups>) => layout.groups.map(g => `${g.name} `
     + `${g.changedLines}: ${g.files.map(f => f.path + (f.isPartial ? " (partial)" : "")).join(", ")}`);
 
-  it("sorts groups smallest first, lists files under each of their groups, and ends with Ungrouped", () => {
+  it("sorts groups smallest first (empty ones included), lists files under each of their groups, and ends with "
+    + "Ungrouped", () => {
     let layout = arrangeGroups(changeGroups, ["a.ts", "image.png", "new.ts", "t.ts", "unassigned.ts",
       "z.ts"], "mb", ["old.ts"]);
 
     expect(layout.isStale).toBe(false);
     expect(describeLayout(layout)).toEqual([
+      "Gone 0: ",
       "Small 2: image.png, z.ts (partial)",
       "Tie 2: t.ts, unassigned.ts",
       "Big 15: a.ts, z.ts (partial)",
@@ -138,6 +140,6 @@ describe("arrangeGroups", () => {
     let layout = arrangeGroups(changeGroups, ["z.ts"], "other");
 
     expect(layout.isStale).toBe(true);
-    expect(describeLayout(layout)).toEqual(["Small 2: z.ts", "Big 10: z.ts"]);
+    expect(describeLayout(layout)).toEqual(["Tie 0: ", "Gone 0: ", "Small 2: z.ts", "Big 10: z.ts"]);
   });
 });

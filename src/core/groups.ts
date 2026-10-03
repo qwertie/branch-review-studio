@@ -112,7 +112,11 @@ export async function createChangeGroups(repoRoot: string, mergeBaseSha: string,
         + "every group that lists the file.");
   }
   for (let group of input.groups.filter(g => !files.some(f => getFileGroupIds(f).includes(g.id))))
-    notes.push(`Group '${group.id}' includes no changes, so Branch Review Studio doesn't show it.`);
+    notes.push(`Group '${group.id}' includes no changes, so Branch Review Studio shows it without files.`);
+  let ungroupedFiles = changedFiles.filter(c => !files.some(f => f.file === c.path)).map(c => c.path);
+  if (ungroupedFiles.length > 0)
+    notes.push("These changed files are in no group, so Branch Review Studio lists them under Ungrouped: "
+      + ungroupedFiles.join(", "));
   let changeGroups = { mergeBaseSha, createdAt: new Date().toISOString(), groups: input.groups, files };
   return { changeGroups, notes };
 }
@@ -194,7 +198,8 @@ export function buildGroupViewText(baseText: string, groupedFile: GroupedFile, g
 /**
  * Arranges the changed files into groups for the tree: each grouped file appears under every group
  * whose view of it shows a hunk (see getFileGroupIds). Groups are sorted by size, smallest first
- * (ties keep the agent's order); groups without changed files are omitted. Changed files that are in
+ * (ties keep the agent's order), so groups without changed files (e.g. because the changes were
+ * reverted, or the agent erred) come first, where they stand out. Changed files that are in
  * no group, e.g. files changed after the groups were posted, go into a final Ungrouped group, with
  * `unchangedFiles` (files that the tree lists although they have no changes, e.g. because they have
  * threads).
@@ -210,7 +215,7 @@ export function arrangeGroups(changeGroups: ChangeGroups, changedFiles: string[]
     let arrangedFiles = files.map(f => ({ path: f.file, isPartial: !isStale && f.hunks.some(h => isHiddenInView(h,
       group.id)) }));
     return { ...group, changedLines, files: arrangedFiles.sort(comparePaths) };
-  }).filter(g => g.files.length > 0).sort((a, b) => a.changedLines - b.changedLines);
+  }).sort((a, b) => a.changedLines - b.changedLines);
   let ungroupedFiles = [...changedFiles.filter(file => !groups.some(g => g.files.some(f => f.path === file))),
     ...unchangedFiles];
   if (ungroupedFiles.length > 0) {
@@ -221,8 +226,10 @@ export function arrangeGroups(changeGroups: ChangeGroups, changedFiles: string[]
   return { groups, isStale };
 }
 
-/** Describes a group's size, e.g. "12 lines, 3 files" (the Ungrouped group: "3 files"). */
+/** Describes a group's size, e.g. "12 lines, 3 files", "no changes" (the Ungrouped group: "3 files"). */
 export function describeGroupSize(group: ArrangedGroup): string {
+  if (group.files.length === 0)
+    return "no changes";
   return (group.changedLines === undefined ? "" : formatCount(group.changedLines, "line") + ", ")
     + formatCount(group.files.length, "file");
 }
