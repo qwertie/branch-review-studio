@@ -69,10 +69,9 @@ The Branch Review Studio panel (gear button) shows these steps too.
 2. Start the review: open Claude Code (CLI, VS Code extension or T3 Code) or Codex (CLI, VS Code
    extension or app) in the branch's worktree folder, then run the skill
    (`/branch-review-studio` in Claude Code, `$branch-review-studio` in Codex) or paste the review
-   prompt that the panel's **Copy Review Prompt** button copies, e.g. "Review branch `feature/x`,
-   following the branch-review-studio skill if you have it, and post your findings as Branch
-   Review Studio threads with the `branch-review-studio` MCP tools: call review_begin with
-   baseBranch "develop" and follow the instructions it returns, ...". The skill reviews in a
+   prompt that the panel's **Copy Review Prompt** button copies: "Use the branch-review-studio
+   skill to review branch `feature/x` against `develop`. If you don't have that skill, call
+   review_begin (`branch-review-studio` MCP tools) and follow its instructions." The skill reviews in a
    single context; add "be thorough" (or `--thorough`) for a review by parallel sub-agents, which
    costs several times as many tokens.
    If the repo has its own review command that posts to Branch Review Studio (e.g. Barreleye's

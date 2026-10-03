@@ -75,13 +75,10 @@ describe("getAgentChoices", () => {
 });
 
 describe("buildReviewPrompt", () => {
-  it("names the branch, the base branch and the review tools", () => {
-    let prompt = buildReviewPrompt("feature/x", "develop");
-
-    expect(prompt).toContain("branch `feature/x`, following the " + mcpServerName + " skill if you have it");
-    expect(prompt).toContain("`" + mcpServerName + "` MCP tools");
-    expect(prompt).toContain('review_begin with baseBranch "develop"');
-    expect(prompt).toMatch(/follow the instructions it returns.*review_comment.*review_set_groups.*review_finish/);
+  it("names the skill, the branch and the base branch, with review_begin as the fallback", () => {
+    expect(buildReviewPrompt("feature/x", "develop")).toBe("Use the " + mcpServerName + " skill to review branch "
+      + "`feature/x` against `develop`. If you don't have that skill, call review_begin (`" + mcpServerName
+      + "` MCP tools) and follow its instructions.");
   });
 });
 

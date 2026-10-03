@@ -85,17 +85,13 @@ export function buildThreadPrompt(context: ThreadMessageContext, sessionMode: Ag
 }
 
 /**
- * Builds a prompt that asks an agent to review the current branch, following the skill if the
- * agent has it, and to post its findings with this extension's MCP tools, e.g. for the user to
- * paste into an agent's chat.
+ * Builds a short prompt that asks an agent to review the current branch with the skill, for the user
+ * to paste into an agent's chat. The skill holds the procedure; without the skill, review_begin's
+ * result tells the agent how to post its findings.
  */
 export function buildReviewPrompt(branch: string, baseBranch: string): string {
-  return `Review branch \`${branch}\`, following the ${mcpServerName} skill if you have it, and post your `
-    + `findings as Branch Review Studio threads with the \`${mcpServerName}\` MCP tools: call review_begin with `
-    + `baseBranch "${baseBranch}" and follow the instructions it returns to post each finding `
-    + "with review_comment, post groups of related changes with review_set_groups, and call review_finish with an "
-    + "overall summary. The changes to review are the working tree, including uncommitted and untracked files, "
-    + `compared with the merge-base of HEAD and ${baseBranch} (review_begin reports it).`;
+  return `Use the ${mcpServerName} skill to review branch \`${branch}\` against \`${baseBranch}\`. `
+    + `If you don't have that skill, call review_begin (\`${mcpServerName}\` MCP tools) and follow its instructions.`;
 }
 
 /** Parameters of `AgentIntegration.buildArgs`. */
