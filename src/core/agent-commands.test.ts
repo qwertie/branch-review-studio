@@ -43,8 +43,8 @@ describe("buildThreadPrompt", () => {
   it("says when the thread is outdated or the file is missing", () => {
     let { review, thread, location } = createSample();
 
-    let prompt = buildThreadPrompt({ review, thread, fileLines: undefined, location: { ...location, isOutdated: true } },
-      "fork");
+    let outdatedLocation = { ...location, isOutdated: true };
+    let prompt = buildThreadPrompt({ review, thread, fileLines: undefined, location: outdatedLocation }, "fork");
 
     expect(prompt).toContain("outdated");
     expect(prompt).toContain("file does not exist");
@@ -53,8 +53,9 @@ describe("buildThreadPrompt", () => {
 
 describe("buildClaudeArgs", () => {
   it("resumes and forks the review session in an interactive terminal", () => {
-    expect(buildClaudeArgs({ prompt: "hi\nthere", sessionMode: "fork", resumeSessionId: "s-1", runMode: "interactive" }))
-      .toEqual(["--resume", "s-1", "--fork-session", "hi\nthere"]);
+    let args = buildClaudeArgs({ prompt: "hi\nthere", sessionMode: "fork", resumeSessionId: "s-1",
+      runMode: "interactive" });
+    expect(args).toEqual(["--resume", "s-1", "--fork-session", "hi\nthere"]);
   });
 
   it("starts a fresh print-mode session with stream-json output that may call the MCP tools", () => {

@@ -232,7 +232,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "package": "npm run typecheck && node esbuild.mjs --production && vsce package --no-dependencies --allow-missing-repository --skip-license",
-    "sample-review": "esbuild scripts/create-sample-review.ts --bundle --platform=node --format=cjs --outfile=out/create-sample-review.js && node out/create-sample-review.js"
+    "sample-review": "esbuild scripts/create-sample-review.ts --bundle --platform=node --format=cjs --outfile=out/create-sample-review.js && node out/create-sample-review.js",
+    "smoke-test": "node scripts/run-smoke-test.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

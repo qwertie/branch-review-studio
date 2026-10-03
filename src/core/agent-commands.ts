@@ -4,17 +4,17 @@ import { getAuthorLabel, Review, ReviewThread } from "./review";
 /** Name under which the MCP server is registered with Claude Code (`claude mcp add <name>`). */
 export const mcpServerName = "branch-review-studio";
 
-/** 'fork' = resume the review session as a fork (`--fork-session`), 'fresh' = start a new session */
+/** 'fork' = resume the review session as a fork (`--fork-session`); 'fresh' = start a new one */
 export type AgentSessionMode = "fork" | "fresh";
 /** 'interactive' = a VS Code terminal running claude; 'background' = `claude -p` with no UI */
 export type AgentRunMode = "interactive" | "background";
 
-/** What `buildThreadPrompt` needs to know about a thread whose newest comment is the user's new message. */
+/** What `buildThreadPrompt` needs to know about a thread that just got a message from the user. */
 export interface ThreadMessageContext {
   review: Review;
   /** The thread; its last comment is the user's new message */
   thread: ReviewThread;
-  /** Current lines of the thread's file on the thread's side, or undefined if the file is missing */
+  /** Current lines of the thread's file on the thread's side; undefined if the file is missing */
   fileLines: string[] | undefined;
   /** Where the thread's anchor is in `fileLines` (see locateAnchor) */
   location: AnchorLocation;
@@ -88,7 +88,7 @@ export function buildClaudeArgs(invocation: ClaudeInvocation): string[] {
   return args;
 }
 
-/** Formats the thread's lines plus surrounding lines with line numbers, marking the thread's lines with '>'. */
+/** Formats the thread's lines and surrounding lines with line numbers, marking the former with '>'. */
 function formatExcerpt(lines: string[], location: AnchorLocation): string {
   let first = Math.max(1, location.startLine - excerptContextLines);
   let last = Math.min(lines.length, location.endLine + excerptContextLines);

@@ -13,8 +13,9 @@ const staleLockMs = 10_000;
 const lockTimeoutMs = 30_000;
 
 /**
- * Reads and writes the reviews of one repo. Reviews live in `<git-common-dir>/branch-review-studio/`,
- * which all worktrees of the repo share, one JSON file per branch. Both the VS Code extension and
+ * Reads and writes the reviews of one repo. Reviews live in
+ * `<git-common-dir>/branch-review-studio/`, which all worktrees of the repo share, one JSON file
+ * per branch. Both the VS Code extension and
  * the MCP server process modify these files, so every modification goes through `updateReview`,
  * which holds an exclusive lock file while it reads, mutates and atomically replaces the file.
  */

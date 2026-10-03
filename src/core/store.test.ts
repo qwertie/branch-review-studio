@@ -92,7 +92,8 @@ describe("ReviewStore", () => {
   it("refuses to read a review written by a newer schema version", async () => {
     let store = createStore();
     await store.ensureExists();
-    fs.writeFileSync(store.getReviewPath("b"), JSON.stringify({ ...createReview("b", "develop", "abc"), schemaVersion: 999 }));
+    let futureReview = { ...createReview("b", "develop", "abc"), schemaVersion: 999 };
+    fs.writeFileSync(store.getReviewPath("b"), JSON.stringify(futureReview));
     await expect(store.readReview("b")).rejects.toThrow(/newer version/);
   });
 });

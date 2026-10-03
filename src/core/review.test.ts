@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { addComment, addThread, createReview, findLatestSession, getAuthorLabel, getThread, recordSession } from "./review";
+import {
+  addComment, addThread, createReview, findLatestSession, getAuthorLabel, getThread, recordSession,
+} from "./review";
 
 const anchor = { startLine: 1, endLine: 1, lineText: "x", contextBefore: [], contextAfter: [] };
 

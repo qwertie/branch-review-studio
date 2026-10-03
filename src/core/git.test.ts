@@ -2,8 +2,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  addWorktree, findMergeBase, findRepoRoot, getChangedFiles, getCurrentBranch, getDefaultWorktreePath, getFileAtRevision,
-  getGitCommonDir, listBranches, listWorktrees, parseBranchRefs, parseWorktreeList,
+  addWorktree, findMergeBase, findRepoRoot, getChangedFiles, getCurrentBranch, getDefaultWorktreePath,
+  getFileAtRevision, getGitCommonDir, listBranches, listWorktrees, parseBranchRefs, parseWorktreeList,
 } from "./git";
 import { createTempDir, TempRepo } from "./test-helpers";
 

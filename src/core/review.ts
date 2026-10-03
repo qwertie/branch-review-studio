@@ -126,7 +126,7 @@ export function getThread(review: Review, threadId: string): ReviewThread {
   return thread;
 }
 
-/** Adds a session to `review.sessions` (in place) unless a session with the same id is already there. */
+/** Adds a session to `review.sessions` (in place) unless a session with that id is there. */
 export function recordSession(review: Review, sessionId: string, cwd: string, role: SessionRole): void {
   if (!review.sessions.some(s => s.sessionId === sessionId))
     review.sessions.push({ sessionId, cwd, role, createdAt: new Date().toISOString() });
@@ -137,7 +137,7 @@ export function findLatestSession(review: Review, role: SessionRole): ReviewSess
   return review.sessions.findLast(s => s.role === role);
 }
 
-/** Gets the name shown on a comment, e.g. "Claude (Major)" for the agent comment that opened a thread. */
+/** Gets the name shown on a comment, e.g. "Claude (Major)" on an agent's thread-opening comment. */
 export function getAuthorLabel(thread: ReviewThread, comment: ReviewComment): string {
   let isOpeningAgentComment = comment.author.kind === "agent" && thread.comments[0] === comment;
   return isOpeningAgentComment && thread.severity ? `${comment.author.name} (${thread.severity})` : comment.author.name;

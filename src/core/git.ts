@@ -78,7 +78,7 @@ export async function getFileAtRevision(repoRoot: string, revision: string, file
   }
 }
 
-/** Gets the top-level folder of the working tree containing `folder`, or undefined if not in a repo. */
+/** Gets the top folder of the working tree containing `folder`; undefined if not in a repo. */
 export async function findRepoRoot(folder: string): Promise<string | undefined> {
   try {
     return path.resolve((await runGit(folder, ["rev-parse", "--show-toplevel"])).trim());
@@ -115,7 +115,7 @@ export async function listWorktrees(repoRoot: string): Promise<WorktreeInfo[]> {
   return parseWorktreeList(await runGit(repoRoot, ["worktree", "list", "--porcelain"]));
 }
 
-/** Lists local branches plus branches that exist only on a remote, most recently committed first. */
+/** Lists local branches plus remote-only branches, most recently committed first. */
 export async function listBranches(repoRoot: string): Promise<BranchInfo[]> {
   let output = await runGit(repoRoot,
     ["for-each-ref", "--sort=-committerdate", "--format=%(refname)", "refs/heads", "refs/remotes"]);
@@ -135,7 +135,8 @@ export async function addWorktree(repoRoot: string, worktreePath: string, branch
 
 /**
  * Gets the folder in which Switch Branch creates a new worktree for `branch`: a subfolder of
- * `worktreeRoot` or, if that is empty, of a sibling of the main worktree named `<repoName>.worktrees`.
+ * `worktreeRoot` or, if that is empty, of a sibling of the main worktree named
+ * `<repoName>.worktrees`.
  */
 export function getDefaultWorktreePath(mainWorktreePath: string, worktreeRoot: string, branch: string): string {
   let root = worktreeRoot || path.join(path.dirname(mainWorktreePath), path.basename(mainWorktreePath) + ".worktrees");
@@ -193,7 +194,9 @@ export function parseBranchRefs(refNames: string[]): BranchInfo[] {
     if (match && match[2] !== "HEAD") {
       let [, remote, name] = match;
       let existing = branches.get(name);
-      if (existing === undefined || (!existing.isLocal && remote === "origin" && !existing.remoteRef?.startsWith("origin/")))
+      let isOriginReplacingOtherRemote = remote === "origin" && existing?.isLocal === false
+        && !existing.remoteRef?.startsWith("origin/");
+      if (existing === undefined || isOriginReplacingOtherRemote)
         branches.set(name, { name, isLocal: false, remoteRef: `${remote}/${name}` });
     }
   }
