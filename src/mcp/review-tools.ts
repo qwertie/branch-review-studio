@@ -7,34 +7,41 @@ import { getRepoRelativePath, readFileLines } from "../core/files";
 import { findMergeBase, findRepoRoot, getChangedFiles, getCurrentBranch, getGitCommonDir } from "../core/git";
 import { arrangeGroups, ChangeGroupsInput, createChangeGroups, describeGroupSize } from "../core/groups";
 import {
-  addComment, addThread, AgentKind, createReview, DiffSide, formatCount, getBaseBranchName, getThread, recordSession,
-  Review, ReviewThread, SessionRole, Severity, ThreadStatus,
+  addComment, addThread, createReview, DiffSide, formatCount, getBaseBranchName, getThread, IntegrationId,
+  recordSession, Review, ReviewThread, SessionRole, Severity, ThreadStatus,
 } from "../core/review";
 import { ReviewStore } from "../core/store";
+import { mcpClientEnvVar, vscodeChatDisplayName } from "../core/vscode-chat";
 
 /** Who is calling the tools (see identifyCaller); `cwd` is the agent session's project folder. */
 export interface ToolCaller {
   cwd: string;
-  /** Claude Code session id or Codex thread id, if known */
+  /** Claude Code session id, Codex thread id or VS Code chat session id, if known */
   sessionId: string | undefined;
-  agent: AgentKind;
+  agent: IntegrationId;
   /** Author name shown on the caller's comments, e.g. "Claude" */
   agentName: string;
 }
 
 /**
- * Identifies the agent session that calls a tool. Codex sends its thread id in every request's
- * `_meta` (as `threadId` and in `x-codex-turn-metadata`), and calls itself "codex-mcp-client";
- * Claude Code sets CLAUDE_CODE_SESSION_ID in the server's environment.
+ * Identifies the agent session that calls a tool. VS Code's chat sends its chat session id in
+ * every request's `_meta` (as `vscode.conversationId`), and this extension's definition of the
+ * server for VS Code sets mcpClientEnvVar; Codex sends its thread id in `_meta` (as `threadId`
+ * and in `x-codex-turn-metadata`), and calls itself "codex-mcp-client"; Claude Code sets
+ * CLAUDE_CODE_SESSION_ID in the server's environment.
  */
 export function identifyCaller(cwd: string, meta: Record<string, unknown> | undefined, env: NodeJS.ProcessEnv,
   clientName: string | undefined): ToolCaller {
+  let findString = (values: unknown[]) => values.find((id): id is string => typeof id === "string");
+  let conversationId = findString([meta?.["vscode.conversationId"]]);
   let turnMetadata = meta?.["x-codex-turn-metadata"] as Record<string, unknown> | undefined;
-  let codexThreadId = [meta?.threadId, turnMetadata?.thread_id].find((id): id is string => typeof id === "string");
-  return codexThreadId || clientName === "codex-mcp-client"
-    ? { cwd, sessionId: codexThreadId, agent: "codex", agentName: codexIntegration.authorName }
-    : { cwd, sessionId: env.CLAUDE_CODE_SESSION_ID || undefined, agent: "claude",
-      agentName: env.BRS_AGENT_NAME || claudeIntegration.authorName };
+  let codexThreadId = findString([meta?.threadId, turnMetadata?.thread_id]);
+  return conversationId || env[mcpClientEnvVar] === "vscodeChat"
+    ? { cwd, sessionId: conversationId, agent: "vscodeChat", agentName: vscodeChatDisplayName }
+    : codexThreadId || clientName === "codex-mcp-client"
+      ? { cwd, sessionId: codexThreadId, agent: "codex", agentName: codexIntegration.authorName }
+      : { cwd, sessionId: env.CLAUDE_CODE_SESSION_ID || undefined, agent: "claude",
+        agentName: env.BRS_AGENT_NAME || claudeIntegration.authorName };
 }
 
 /** Arguments of review_comment. */

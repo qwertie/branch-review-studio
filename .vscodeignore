@@ -3,6 +3,7 @@
 !dist/mcp-server.js
 !media/**
 !skills/**
+!agents/**
 !package.json
 !README.md
 !LICENSE

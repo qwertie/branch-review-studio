@@ -71,7 +71,7 @@ export interface KeyValueStorage {
 
 /**
  * Remembers, in persistent storage, the last error that occurred while using each integration
- * (an agent CLI, or VS Code's language models), until the next successful use of that integration.
+ * (an agent CLI, or VS Code's chat), until the next successful use of that integration.
  */
 export class IntegrationErrorLog {
   private static readonly storageKey = "branchReviewStudio.integrationErrors";

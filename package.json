@@ -1,8 +1,8 @@
 {
   "name": "branch-review-studio",
   "displayName": "Branch Review Studio",
-  "description": "Review a branch's working tree against its merge-base with develop, with comment threads exchanged with AI agents (Claude Code, Codex) or VS Code language models.",
-  "version": "0.7.0",
+  "description": "Review a branch's working tree against its merge-base with develop, with comment threads exchanged with AI agents (Claude Code, Codex or VS Code's chat).",
+  "version": "0.8.0",
   "publisher": "qwertie",
   "private": true,
   "license": "Unlicense",
@@ -27,6 +27,28 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "branchReviewStudio.mcpServer",
+        "label": "Branch Review Studio"
+      }
+    ],
+    "chatSkills": [
+      {
+        "path": "./skills/branch-review-studio/SKILL.md",
+        "sessionTypes": [
+          "local"
+        ]
+      }
+    ],
+    "chatAgents": [
+      {
+        "path": "./agents/branch-reviewer.agent.md",
+        "sessionTypes": [
+          "local"
+        ]
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {
@@ -172,11 +194,6 @@
         "command": "branchReviewStudio.uninstall",
         "title": "Uninstall MCP Server and Skills",
         "category": "Branch Review Studio"
-      },
-      {
-        "command": "branchReviewStudio.chooseLanguageModel",
-        "title": "Choose Language Model…",
-        "category": "Branch Review Studio"
       }
     ],
     "menus": {
@@ -310,11 +327,6 @@
           "type": "string",
           "default": "",
           "description": "Path of the Codex CLI (codex.exe or codex). Empty means the CLI bundled with the OpenAI Codex VS Code extension (openai.chatgpt) if it is installed, else codex on PATH."
-        },
-        "branchReviewStudio.languageModel": {
-          "type": "string",
-          "default": "",
-          "description": "VS Code language model that Ask Agent offers for answering threads (read-only; it can't run reviews or edit files), as vendor/id (e.g. copilot/gpt-5, which Choose Language Model… sets), id, family or name. Empty, or a model that isn't available, means the first available model. Models come from GitHub Copilot, API keys added with Manage Models, or other extensions."
         }
       }
     }

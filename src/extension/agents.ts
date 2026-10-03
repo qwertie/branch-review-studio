@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { mcpServerName } from "../core/agent-commands";
 import { AgentCommand, AgentIntegration, getSearchOptionsForProcess } from "../core/agent-integration";
 import { claudeIntegration } from "../core/claude-cli";
 import { codexIntegration, findCodexExtensionExecutables } from "../core/codex-cli";
@@ -36,6 +37,11 @@ export function findAgentCommand(integration: AgentIntegration): AgentCommand | 
 /** Gets the path of the MCP server script bundled with this extension. */
 export function getBundledServerPath(context: vscode.ExtensionContext): string {
   return path.join(context.extensionPath, "dist", "mcp-server.js");
+}
+
+/** Gets the path of the branch-review-studio skill bundled with this extension. */
+export function getBundledSkillPath(context: vscode.ExtensionContext): string {
+  return path.join(context.extensionPath, "skills", mcpServerName, "SKILL.md");
 }
 
 /**

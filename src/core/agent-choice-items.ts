@@ -2,8 +2,8 @@ import { AgentChoice, getAgentChoices } from "./agent-commands";
 import { AgentIntegration } from "./agent-integration";
 import { claudeIntegration } from "./claude-cli";
 import { codexIntegration } from "./codex-cli";
-import { languageModelChoiceDetail, languageModelDisplayName } from "./language-model";
-import { AgentKind, ReviewSession } from "./review";
+import { AgentKind, IntegrationId, ReviewSession } from "./review";
+import { vscodeChatChoiceDetail, vscodeChatDisplayName } from "./vscode-chat";
 
 /** An item of Ask Agent's QuickPick (a vscode.QuickPickItem without VS Code types). */
 export interface AgentChoiceItem {
@@ -23,31 +23,36 @@ export function getAgentIntegration(agent: AgentKind): AgentIntegration {
 
 /**
  * Builds Ask Agent's QuickPick items for the ways to send the message (see getAgentChoices),
- * default first, with a separator per agent if there are several agents. `languageModelName` is
- * the name of the VS Code language model to offer, if any.
+ * default first, with a separator per agent if there are several agents. `forkableSession` can be
+ * forked only if a CLI agent in `availableAgents` ran it.
  */
 export function getAgentChoiceItems(availableAgents: AgentKind[],
-  forkableSession: Pick<ReviewSession, "agent" | "sessionId"> | undefined, languageModelName: string | undefined)
+  forkableSession: Pick<ReviewSession, "agent" | "sessionId"> | undefined, hasVscodeChat: boolean)
   : AgentChoiceItem[] {
-  let choices = getAgentChoices(availableAgents, forkableSession?.agent, languageModelName !== undefined);
+  let choices = getAgentChoices(availableAgents, forkableSession?.agent, hasVscodeChat);
   let hasSeveralAgents = new Set(choices.map(c => c.agent)).size > 1;
   let items: AgentChoiceItem[] = [];
   for (let choice of choices) {
     let { agent } = choice;
-    let integration = agent === "languageModel" ? undefined : getAgentIntegration(agent);
     if (hasSeveralAgents && items.at(-1)?.choice?.agent !== agent)
-      items.push({ label: integration?.displayName ?? languageModelDisplayName, isSeparator: true });
-    if (integration) {
+      items.push({ label: getIntegrationDisplayName(agent), isSeparator: true });
+    if (agent === "vscodeChat") {
+      items.push({ label: `$(chat-sparkle) ${vscodeChatDisplayName} (agent mode)`, description: "new chat",
+        detail: vscodeChatChoiceDetail, choice });
+    } else {
+      let integration = getAgentIntegration(agent);
       let isFork = choice.sessionMode === "fork";
       let where = choice.runMode === "interactive" ? "interactive terminal" : "background";
       items.push({ choice, label: `${isFork ? "$(repo-forked) Fork review session" : "$(add) Fresh session"}, ${where}`,
         description: isFork ? `forks session ${forkableSession?.sessionId.slice(0, 8)}` : undefined,
         detail: choice.runMode === "background"
           ? `Runs ${integration.backgroundCommand}; the answer appears in the thread` : undefined });
-    } else {
-      items.push({ label: `$(comment-discussion) ${languageModelName}, background`,
-        description: "VS Code language model", detail: languageModelChoiceDetail, choice });
     }
   }
   return items;
+}
+
+/** Gets the name of an integration shown in the UI, e.g. "Claude Code" or "VS Code Chat". */
+function getIntegrationDisplayName(integration: IntegrationId): string {
+  return integration === "vscodeChat" ? vscodeChatDisplayName : getAgentIntegration(integration).displayName;
 }

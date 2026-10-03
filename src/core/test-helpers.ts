@@ -68,12 +68,3 @@ export function createFiles(...files: (string | [relativePath: string, text: str
 export function createTempDir(): string {
   return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "brs-test-")));
 }
-
-/**
- * Waits for processes that an AbortSignal killed to exit: execFile reports the abort before the
- * process exits, and Windows can't delete a folder that a running process uses (see
- * TempRepo.dispose).
- */
-export function waitForKilledProcesses(): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, 1000));
-}

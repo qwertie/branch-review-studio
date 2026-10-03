@@ -55,37 +55,23 @@ export function buildThreadPrompt(context: ThreadMessageContext, sessionMode: Ag
   let parts: string[] = [];
 
   if (sessionMode === "fresh") {
-    parts.push(`You are helping review branch \`${review.branch}\`. The branch's changes are the working tree `
-      + `(including uncommitted and untracked files) compared with its merge-base with ${review.baseBranch}; `
-      + `see them with \`git diff ${review.mergeBaseSha}\` plus \`git status\`.`);
+    parts.push(describeBranch(review));
     if (review.summary)
       parts.push(`Review summary:\n\n${review.summary}`);
   }
 
-  parts.push(...describeThreadMessage(context, undefined));
-  parts.push(`Answer by calling the \`${mcpServerName}\` MCP tool \`review_reply\` with threadId "${thread.id}" `
-    + "and your answer in markdown. Edit files only if the message asks you to; if you do, summarize the edits "
-    + "in your reply. If the `review_reply` tool is unavailable, give your answer as your final message.");
+  parts.push(...describeThreadMessage(context, false), describeReplyRequest(thread));
   return parts.join("\n\n");
 }
 
 /**
- * Builds the prompt that sends the user's newest thread message to a language model that has
- * read-only tools (see RepoTools) and whose final message becomes its reply. `nearbyDiff` holds the
- * hunks of the file's diff near the thread (see RepoTools.getDiffNear).
+ * Builds the prompt that Ask Agent sends to VS Code's chat (see buildChatOpenArgs), which the user
+ * sees as their chat message, so it omits the review summary. If `isFileAttached`, the chat has
+ * the thread's lines as an attachment, so the prompt doesn't quote them.
  */
-export function buildLanguageModelPrompt(context: ThreadMessageContext, nearbyDiff: string | undefined): string {
-  let { review } = context;
-  let parts = [`You are helping review branch \`${review.branch}\` in Branch Review Studio, a VS Code extension. `
-    + "The branch's changes are the working tree (including uncommitted and untracked files) compared with its "
-    + `merge-base with ${review.baseBranch}. You have read-only tools to read and search the repo's files and to `
-    + "see the branch's changes; use them to check facts before you answer, and cite files and line numbers."];
-  if (review.summary)
-    parts.push(`Review summary:\n\n${review.summary}`);
-  parts.push(...describeThreadMessage(context, nearbyDiff));
-  parts.push("Answer the new message in markdown; your final message is posted to the thread as your reply. You "
-    + "cannot edit files: if the message asks for changes, show them as code or a diff in your answer.");
-  return parts.join("\n\n");
+export function buildChatThreadPrompt(context: ThreadMessageContext, isFileAttached: boolean): string {
+  return [describeBranch(context.review), ...describeThreadMessage(context, isFileAttached),
+    describeReplyRequest(context.thread)].join("\n\n");
 }
 
 /**
@@ -123,7 +109,7 @@ export function getSessionIdToFork(invocation: AgentInvocation): string {
 
 /** One way in which Ask Agent can send a thread message (see getAgentChoices). */
 export interface AgentChoice {
-  /** Who answers: an agent CLI, or a VS Code language model ('languageModel', always fresh, background) */
+  /** Who answers: an agent CLI, or VS Code's chat ('vscodeChat', always fresh, interactive) */
   agent: IntegrationId;
   sessionMode: AgentSessionMode;
   runMode: AgentRunMode;
@@ -131,29 +117,44 @@ export interface AgentChoice {
 
 /**
  * Lists the ways in which Ask Agent can send a message to the agents in `availableAgents`, default
- * first. Only the agent that ran the review session (`forkableAgent`) can fork it, and forking is
- * cheaper and better informed than a fresh session, so that agent's options come first. Each agent
- * offers an interactive terminal before a background run. If `hasLanguageModel`, a VS Code language
- * model comes last, since it has no session and can only read the repo.
+ * first. Only the CLI agent that ran the review session (`forkableAgent`) can fork it, and forking
+ * is cheaper and better informed than a fresh session, so that agent's options come first. Each
+ * agent offers an interactive terminal before a background run. If `hasVscodeChat`, VS Code's chat
+ * comes last (a new chat, since VS Code can't fork chats).
  */
-export function getAgentChoices(availableAgents: AgentKind[], forkableAgent: AgentKind | undefined,
-  hasLanguageModel = false): AgentChoice[] {
+export function getAgentChoices(availableAgents: AgentKind[], forkableAgent: IntegrationId | undefined,
+  hasVscodeChat = false): AgentChoice[] {
   let agents = [...availableAgents.filter(a => a === forkableAgent),
     ...availableAgents.filter(a => a !== forkableAgent)];
   let runModes: AgentRunMode[] = ["interactive", "background"];
-  let choices = agents.flatMap(agent => {
+  let choices: AgentChoice[] = agents.flatMap(agent => {
     let sessionModes: AgentSessionMode[] = agent === forkableAgent ? ["fork", "fresh"] : ["fresh"];
     return sessionModes.flatMap(sessionMode => runModes.map(runMode => ({ agent, sessionMode, runMode })));
   });
-  return hasLanguageModel
-    ? [...choices, { agent: "languageModel", sessionMode: "fresh", runMode: "background" }] : choices;
+  return hasVscodeChat ? [...choices, { agent: "vscodeChat", sessionMode: "fresh", runMode: "interactive" }]
+    : choices;
+}
+
+/** Describes the reviewed branch and how to see its changes, for a fresh session's prompt. */
+function describeBranch(review: Review): string {
+  return `You are helping review branch \`${review.branch}\`. The branch's changes are the working tree `
+    + `(including uncommitted and untracked files) compared with its merge-base with ${review.baseBranch}; `
+    + `see them with \`git diff ${review.mergeBaseSha}\` plus \`git status\`.`;
+}
+
+/** Asks an agent to answer `thread` with the review_reply MCP tool. */
+function describeReplyRequest(thread: ReviewThread): string {
+  return `Answer by calling the \`${mcpServerName}\` MCP tool \`review_reply\` with threadId "${thread.id}" `
+    + "and your answer in markdown. Edit files only if the message asks you to; if you do, summarize the edits "
+    + "in your reply. If the `review_reply` tool is unavailable, give your answer as your final message.";
 }
 
 /**
- * Describes a thread for a prompt: where it is, the lines it is about (and `nearbyDiff`, if any),
- * its earlier messages and the user's new message. Returns the prompt's paragraphs.
+ * Describes a thread for a prompt: where it is, the lines it is about (unless `isFileAttached`,
+ * i.e. the agent has them as an attachment), its earlier messages and the user's new message.
+ * Returns the prompt's paragraphs.
  */
-function describeThreadMessage(context: ThreadMessageContext, nearbyDiff: string | undefined): string[] {
+function describeThreadMessage(context: ThreadMessageContext, isFileAttached: boolean): string[] {
   let { review, thread, fileLines, location } = context;
   let priorComments = thread.comments.slice(0, -1);
   let newComment = thread.comments[thread.comments.length - 1];
@@ -163,11 +164,11 @@ function describeThreadMessage(context: ThreadMessageContext, nearbyDiff: string
   let parts = [`In Branch Review Studio, ${newComment.author.name} wrote a message in review thread ${thread.id}, `
     + `which is about ${thread.file} ${lineText} in ${sideText}`
     + (location.isOutdated ? " (the thread is outdated: its original line text is no longer there)." : ".")];
-  parts.push(fileLines === undefined
-    ? "The file does not exist in that version."
-    : "Current lines:\n\n```\n" + formatExcerpt(fileLines, location) + "\n```");
-  if (nearbyDiff !== undefined)
-    parts.push("Changes near these lines since the merge-base (git diff):\n\n```diff\n" + nearbyDiff + "\n```");
+  if (!isFileAttached) {
+    parts.push(fileLines === undefined
+      ? "The file does not exist in that version."
+      : "Current lines:\n\n```\n" + formatExcerpt(fileLines, location) + "\n```");
+  }
   if (priorComments.length > 0) {
     parts.push("Earlier messages in the thread:\n\n"
       + priorComments.map(c => `- ${getAuthorLabel(thread, c)}: ${c.body}`).join("\n"));

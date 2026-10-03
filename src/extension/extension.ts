@@ -14,12 +14,12 @@ import { changeBaseBranch } from "./change-base-branch";
 import { ReviewCommentController } from "./comments";
 import { fetchBase, openAllChanges, openFileDiff, openGroupChanges } from "./diff-commands";
 import { installMcpServer, installSkill, uninstall, updateInstalledServerIfOutdated } from "./install";
-import { chooseLanguageModel } from "./language-models";
 import { BranchReviewModel } from "./model";
 import { ReviewViewProvider, reviewViewId } from "./review-view";
 import { SettingsPanel } from "./settings-panel";
 import { switchBranch } from "./switch-branch";
 import { ThreadNavigator } from "./thread-navigation";
+import { VscodeChatIntegration } from "./vscode-chat";
 
 /** What `activate` returns; scripts/smoke-test.ts uses it to inspect the extension's state. */
 export interface BranchReviewStudioExports {
@@ -27,6 +27,7 @@ export interface BranchReviewStudioExports {
   getSettingsPanelHtml: () => string | undefined;
   /** Gets the body HTML of the Branch Review view */
   getReviewViewHtml: () => string;
+  vscodeChat: VscodeChatIntegration;
 }
 
 /**
@@ -40,7 +41,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Branch
     errors: new IntegrationErrorLog(context.globalState, () => SettingsPanel.renderIfOpen()) };
   void updateInstalledServerIfOutdated(context, log).catch(e => log.appendLine(getErrorMessage(e)));
   let model = await createModel(log);
-  registerRepoIndependentCommands(services, model);
+  let vscodeChat = new VscodeChatIntegration(services, model);
+  context.subscriptions.push(vscodeChat);
+  registerRepoIndependentCommands(services, model, vscodeChat);
   let comments = model && new ReviewCommentController(model);
   let navigator = model && comments && new ThreadNavigator(model, comments);
   let view = new ReviewViewProvider(context.extensionUri, model, navigator);
@@ -57,7 +60,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Branch
     await watchForChanges(context, model);
     await model.refresh();
   }
-  return { model, getSettingsPanelHtml: SettingsPanel.getHtmlIfOpen, getReviewViewHtml: () => view.getBody() };
+  return { model, getSettingsPanelHtml: SettingsPanel.getHtmlIfOpen, getReviewViewHtml: () => view.getBody(),
+    vscodeChat };
 }
 
 export function deactivate(): void {}
@@ -75,13 +79,14 @@ async function createModel(log: vscode.OutputChannel): Promise<BranchReviewModel
 }
 
 /** Registers commands that work without a git repo. */
-function registerRepoIndependentCommands(services: AgentServices, model: BranchReviewModel | undefined): void {
+function registerRepoIndependentCommands(services: AgentServices, model: BranchReviewModel | undefined,
+  vscodeChat: VscodeChatIntegration): void {
   services.context.subscriptions.push(
     vscode.commands.registerCommand("branchReviewStudio.installMcpServer", () => installMcpServer(services)),
     vscode.commands.registerCommand("branchReviewStudio.installSkill", () => installSkill(services.context)),
     vscode.commands.registerCommand("branchReviewStudio.uninstall", () => uninstall(services)),
-    vscode.commands.registerCommand("branchReviewStudio.chooseLanguageModel", chooseLanguageModel),
-    vscode.commands.registerCommand("branchReviewStudio.openSettings", () => SettingsPanel.show(model, services)));
+    vscode.commands.registerCommand("branchReviewStudio.openSettings",
+      () => SettingsPanel.show(model, services, vscodeChat)));
 }
 
 /** Registers commands that need a git repo; without one (`model` undefined), they show an error. */

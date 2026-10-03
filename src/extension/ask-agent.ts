@@ -2,25 +2,25 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as vscode from "vscode";
 import { getAgentChoiceItems, getAgentIntegration } from "../core/agent-choice-items";
-import { buildLanguageModelPrompt, buildThreadPrompt, ThreadMessageContext } from "../core/agent-commands";
+import { buildThreadPrompt, ThreadMessageContext } from "../core/agent-commands";
 import { AgentCommand, AgentIntegration } from "../core/agent-integration";
 import { getErrorMessage } from "../core/files";
-import { answerThreadWithModel } from "../core/language-model";
-import { RepoTools } from "../core/repo-tools";
 import { AgentKind, findLatestSession, Review, ReviewSession, ReviewThread } from "../core/review";
 import { answerThreadInBackground, BackgroundAnswerRequest, recordFollowupSession } from "../core/thread-answer";
+import {
+  buildChatOpenArgs, chatAgentName, chatOpenCommand, newLocalChatCommand, vscodeChatDisplayName,
+} from "../core/vscode-chat";
 import {
   agentIntegrations, AgentServices, codexExtensionId, findAgentCommand, getBundledServerPath, openCodexThread,
 } from "./agents";
 import { ReviewCommentController } from "./comments";
-import { createToolCallingModel, describeLanguageModelError, findLanguageModel } from "./language-models";
 import { BranchReviewModel } from "./model";
 
 /**
  * Saves the user's message in a thread and sends it, with the thread's context, to an agent
  * (Claude Code or Codex): either as a fork of the session that wrote the review (which reuses its
  * prompt cache), with the agent that ran that session, or as a fresh session, in a terminal or in
- * the background. Alternatively, a VS Code language model answers it (see answerWithLanguageModel).
+ * the background. Alternatively, a new chat in VS Code's chat answers it (see askInVscodeChat).
  */
 export async function askAgent(model: BranchReviewModel, comments: ReviewCommentController,
   reply: vscode.CommentReply, services: AgentServices): Promise<void> {
@@ -29,19 +29,19 @@ export async function askAgent(model: BranchReviewModel, comments: ReviewComment
     let command = findAgentCommand(i);
     return command ? [[i.agent, command] as const] : [];
   }));
-  let languageModel = await findLanguageModel();
+  let hasVscodeChat = (await vscode.commands.getCommands(true)).includes(chatOpenCommand);
   if (reply.text.trim() === "") {
     void vscode.window.showErrorMessage("Type a message for the agent first.");
-  } else if (commands.size === 0 && languageModel === undefined) {
-    void vscode.window.showErrorMessage("Could not find the Claude Code CLI (claude), the Codex CLI (codex) or a VS "
-      + "Code language model. Install a CLI (or set the branchReviewStudio.claudePath or branchReviewStudio.codexPath "
-      + "setting), or make a language model available, e.g. with GitHub Copilot.");
+  } else if (commands.size === 0 && !hasVscodeChat) {
+    void vscode.window.showErrorMessage("Could not find the Claude Code CLI (claude), the Codex CLI (codex) or VS "
+      + "Code's chat. Install a CLI (or set the branchReviewStudio.claudePath or branchReviewStudio.codexPath "
+      + "setting).");
   } else {
     let reviewSession = review && findSessionToFork(review, comments.getThreadId(reply.thread));
     // `claude --resume` finds a session only in the folder it ran in
-    let forkableSession = reviewSession && fs.existsSync(reviewSession.cwd) && commands.has(reviewSession.agent)
-      ? reviewSession : undefined;
-    let items = getAgentChoiceItems([...commands.keys()], forkableSession, languageModel?.name)
+    let forkableSession = reviewSession && reviewSession.agent !== "vscodeChat" && commands.has(reviewSession.agent)
+      && fs.existsSync(reviewSession.cwd) ? reviewSession : undefined;
+    let items = getAgentChoiceItems([...commands.keys()], forkableSession, hasVscodeChat)
       .map(i => i.isSeparator ? { ...i, kind: vscode.QuickPickItemKind.Separator } : i);
     let item = await vscode.window.showQuickPick(items,
       { placeHolder: getPlaceHolder(reviewSession, forkableSession, commands) });
@@ -49,11 +49,11 @@ export async function askAgent(model: BranchReviewModel, comments: ReviewComment
     let { review: savedReview, branch } = model.snapshot;
     let thread = savedReview?.threads.find(t => t.id === threadId);
     let choice = item?.choice;
-    let command = choice && choice.agent !== "languageModel" ? commands.get(choice.agent) : undefined;
+    let command = choice && choice.agent !== "vscodeChat" ? commands.get(choice.agent) : undefined;
     let context = thread && savedReview && await getMessageContext(model, savedReview, thread);
-    if (choice?.agent === "languageModel" && languageModel && context) {
-      await answerWithLanguageModel(model, services, languageModel, context);
-    } else if (choice && choice.agent !== "languageModel" && command && thread && context && branch) {
+    if (choice?.agent === "vscodeChat" && context) {
+      await askInVscodeChat(model, services, context);
+    } else if (choice && choice.agent !== "vscodeChat" && command && thread && context && branch) {
       let integration = getAgentIntegration(choice.agent);
       let cwd = choice.sessionMode === "fork" && forkableSession ? forkableSession.cwd : model.repoRoot;
       let threadTitle = getThreadTitle(context);
@@ -90,8 +90,10 @@ function getPlaceHolder(reviewSession: ReviewSession | undefined, forkableSessio
   commands: Map<AgentKind, AgentCommand>): string {
   let question = "How should the agent answer? (Enter = first option)";
   if (reviewSession && !forkableSession) {
-    let reason = commands.has(reviewSession.agent) ? `its folder ${reviewSession.cwd} no longer exists`
-      : `the ${getAgentIntegration(reviewSession.agent).displayName} CLI, which ran it, was not found`;
+    let { agent } = reviewSession;
+    let reason = agent === "vscodeChat" ? "it ran in VS Code's chat, which can't fork chats"
+      : commands.has(agent) ? `its folder ${reviewSession.cwd} no longer exists`
+        : `the ${getAgentIntegration(agent).displayName} CLI, which ran it, was not found`;
     return `The review session can't be forked because ${reason}. ${question}`;
   }
   return question;
@@ -166,49 +168,27 @@ async function answerInBackground(model: BranchReviewModel, services: AgentServi
 }
 
 /**
- * Answers a thread with a VS Code language model, which may read the repo with read-only tools
- * (see RepoTools and answerThreadWithModel), while a cancellable progress notification names each
- * tool call. Records the outcome as a success or an error of the language model integration;
- * cancelling isn't an error.
+ * Starts a new chat with VS Code's own agent (not an agent-host harness such as VS Code's Claude
+ * agent), and sends it the thread message, with the thread's lines attached, for the Branch
+ * Reviewer agent (see buildChatOpenArgs). The answer reaches the thread only if the agent calls
+ * review_reply, since extensions can't read chat replies. The chat commands are internal, so a
+ * failure is shown and recorded as the integration's last error.
  */
-async function answerWithLanguageModel(model: BranchReviewModel, services: AgentServices,
-  chat: vscode.LanguageModelChat, context: ThreadMessageContext): Promise<void> {
-  let { review, thread, location } = context;
-  let threadTitle = getThreadTitle(context);
-  let cancellation = new AbortController();
-  let tools = new RepoTools(model.repoRoot, model.snapshot.mergeBase?.mergeBaseSha ?? review.mergeBaseSha,
-    { signal: cancellation.signal });
-  let nearbyDiff = await tools.getDiffNear(thread.file, thread.side, location.startLine, location.endLine)
-    .catch(() => undefined);
-  services.log.appendLine(`Asking ${chat.name} (${chat.vendor}/${chat.id}) about thread ${thread.id}`);
-  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, cancellable: true,
-    title: `${chat.name} is answering the thread on ${threadTitle}` }, async (progress, token) => {
-    let subscription = token.onCancellationRequested(() => cancellation.abort());
-    try {
-      await answerThreadWithModel({ store: model.store, branch: review.branch, threadId: thread.id,
-        model: createToolCallingModel(chat, token), prompt: buildLanguageModelPrompt(context, nearbyDiff), tools,
-        onToolCall: call => {
-          let callText = `${call.name} ${JSON.stringify(call.input)}`;
-          progress.report({ message: callText.slice(0, 100) });
-          services.log.appendLine(`  ${callText}`);
-        } });
-      await services.errors.recordSuccess("languageModel");
-      await model.refresh();
-      void vscode.window.showInformationMessage(`${chat.name} answered the thread on ${threadTitle}.`, "Show Thread")
-        .then(button => button && vscode.commands.executeCommand("branchReviewStudio.openThread", thread.id));
-    } catch (e) {
-      if (token.isCancellationRequested) {
-        services.log.appendLine(`Cancelled asking ${chat.name}.`);
-      } else {
-        let message = describeLanguageModelError(e);
-        services.log.appendLine(`${chat.name} failed: ${message}`);
-        void vscode.window.showErrorMessage(`${chat.name} failed to answer the thread on ${threadTitle}: ${message}`);
-        await services.errors.recordError("languageModel", "Ask Agent (language model)", message);
-      }
-    } finally {
-      subscription.dispose();
-    }
-  });
+async function askInVscodeChat(model: BranchReviewModel, services: AgentServices, context: ThreadMessageContext)
+  : Promise<void> {
+  let args = buildChatOpenArgs(context, vscode.Uri.file(model.getFullPath(context.thread.file)));
+  services.log.appendLine(`Asking ${vscodeChatDisplayName} (${chatAgentName} agent) about thread `
+    + context.thread.id);
+  try {
+    await vscode.commands.executeCommand(newLocalChatCommand);
+    await vscode.commands.executeCommand(chatOpenCommand, args);
+    await services.errors.recordSuccess("vscodeChat");
+  } catch (e) {
+    let message = `${getErrorMessage(e)} (Ask Agent uses VS Code's internal commands ${newLocalChatCommand} and `
+      + `${chatOpenCommand}, which this VS Code version may not support.)`;
+    void vscode.window.showErrorMessage(`Could not open ${vscodeChatDisplayName}: ${message}`);
+    await services.errors.recordError("vscodeChat", "Ask Agent (VS Code Chat)", message);
+  }
 }
 
 /** Gets what the prompts need to know about a thread whose last comment is the user's new message. */

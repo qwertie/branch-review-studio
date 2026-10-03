@@ -143,6 +143,15 @@ export function getViewGroupId(section: OutlineSection, file: OutlineFile): stri
 }
 
 /**
+ * Gets the line of the working-tree file at which a thread starts, or, for a thread on the base
+ * side, the line above which its base lines were (e.g. 12 for position 12.5; at least 1).
+ * revealThread puts the cursor of a diff's modified side there.
+ */
+export function getWorkingTreeLine(thread: OutlineThread): number {
+  return Math.max(Math.floor(thread.position), 1);
+}
+
+/**
  * Lists the outline's threads in order, each once: a file that is in several groups lists its
  * threads under each of them, but they are visited under the first.
  */

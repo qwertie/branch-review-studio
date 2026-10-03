@@ -366,3 +366,31 @@ the reveal targeted the first line. VS Code findings: identical (modified, origi
 the multi-diff editor; no reliable way exists to reveal a line inside the multi-diff editor, so
 threads open in a single-file diff editor. Unanswered: whether the sidebar's buttons should move
 back to the view's title bar.
+
+## S10. Follow-up: VS Code chat replaces VS Code Language Models
+
+### User
+
+> wait a minute. Doesn't VS Code have a native chat interface now? If VS Code provides suitable
+> APIs, I would think our extension could use that to power threads and even do full branch
+> reviews
+
+Research found public APIs for registering MCP servers (`registerMcpServerDefinitionProvider`),
+skills (`chatSkills`) and custom agents (`chatAgents`), and the internal
+`workbench.action.chat.open` command. Answer: P1 (register the MCP server), P2 (ship the skill
+and a Branch Reviewer agent), P3 (Ask Agent → VS Code Chat).
+
+> Didn't you say that integration was updated so that Users could do edits and full branch reviews
+> within Visual Studio Code? "VS Code Language Models" Still seems to have the old description In
+> my installed version.
+
+> "VS Code Chat" If I understand correctly, completely supersedes the old vs code language models
+> so, remove the latter when the new feature is ready.
+
+> Remove mention of [the in-house repo] from the repo (Working copy)
+
+Findings: VS Code trusts MCP servers that extensions provide without a prompt; it keeps one skill
+per name and prefers user/workspace copies over an extension's; `_meta["vscode.conversationId"]`
+identifies the chat. Assumptions: the Branch Reviewer agent may read, search, run commands, edit,
+keep a to-do list and start subagents; Ask Agent offers no fork when the relevant review session
+ran in VS Code chat.

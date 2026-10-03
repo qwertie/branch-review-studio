@@ -11,9 +11,10 @@ import { AgentRunMode, AgentSessionMode, getAgentChoices } from "../src/core/age
 import { createAnchor } from "../src/core/anchoring";
 import { ChangedFile, getBaseBranchChoices, getFileAtRevision, listBranches, MergeBaseInfo } from "../src/core/git";
 import { applyHunks, DiffHunk, readDiffHunks } from "../src/core/hunks";
-import { addThread, createReview, findLatestSession, formatCount, IntegrationId } from "../src/core/review";
+import { addThread, createReview, findLatestSession, IntegrationId } from "../src/core/review";
 import { listChangesEntries, listThreadVisits, ThreadVisit } from "../src/core/review-outline";
 import { ReviewStore } from "../src/core/store";
+import { ChatOpenArgs } from "../src/core/vscode-chat";
 import type { BranchReviewStudioExports } from "../src/extension/extension";
 import { ReviewTools } from "../src/mcp/review-tools";
 
@@ -143,6 +144,7 @@ export async function run(): Promise<void> {
     }
     if (process.env.BRS_SMOKE_CODEX)
       await checkCodex(model, check);
+    await checkVscodeChat(model, exports!, check);
   }
   await check("Settings and Integrations opens the Branch Review Studio panel", async () => {
     await vscode.commands.executeCommand("branchReviewStudio.openSettings");
@@ -160,19 +162,14 @@ export async function run(): Promise<void> {
       await vscode.commands.executeCommand("workbench.action.zoomReset");
     }
   });
-  await check("the panel's VS Code Language Models section states its limits and shows the models", async () => {
-    let models = await vscode.lm.selectChatModels();
-    console.log(`INFO language models: ${JSON.stringify(models.map(m => [m.vendor, m.id, m.name, m.maxInputTokens]))}`);
+  await check("the panel's VS Code Chat section shows the registered MCP server, the skill and the agent", () => {
     let html = exports?.getSettingsPanelHtml() ?? "";
     if (process.env.BRS_SCREENSHOT_DIR)
       fs.writeFileSync(path.join(process.env.BRS_SCREENSHOT_DIR, "settings-panel.html"), html);
-    for (let text of ["VS Code Language Models", "<b>can't</b> run branch reviews", "Choose Model…",
-      "Reviews need Claude Code or Codex", models.length === 0 ? "No models available"
-        : `${formatCount(models.length, "model")} available`])
+    for (let text of ["VS Code Chat — <span class=\"ok\">✔ MCP server registered", "<b>not</b> your Claude Code",
+      "run full branch reviews", "Agent <code>Branch Reviewer</code>", "Skill <code>branch-review-studio</code>"])
       assert.ok(html.includes(text), `the panel lacks "${text}"`);
   });
-  if (model && process.env.BRS_SMOKE_LM)
-    await checkLanguageModelAnswer(model, check);
   if (model && process.env.BRS_SCREENSHOT_DIR)
     await captureScreenshots(model, process.env.BRS_SCREENSHOT_DIR);
   console.log(failures === 0 ? "SMOKE TEST PASSED" : `SMOKE TEST FAILED (${failures})`);
@@ -225,21 +222,67 @@ async function checkCodex(model: Model, check: (name: string, action: () => Prom
 }
 
 /**
- * Runs Ask Agent with a VS Code language model (the last QuickPick item), which spends tokens and
- * may show VS Code's permission prompt, then removes the thread that it added.
+ * Checks the VS Code Chat integration: the MCP server definition that the extension gives VS Code
+ * (and, if VS Code can start the server in the throwaway profile, its tools), the contributed
+ * skill and agent, and the chat commands that Ask Agent's VS Code Chat choice runs, which the check
+ * intercepts so that no chat request (and no model call) happens. Removes the thread it adds.
  */
-async function checkLanguageModelAnswer(model: Model,
+async function checkVscodeChat(model: Model, exports: BranchReviewStudioExports,
   check: (name: string, action: () => Promise<void>) => Promise<void>) {
-  await check("Ask Agent (VS Code language model) posts the model's answer", async () => {
-    assert.ok((await vscode.lm.selectChatModels()).length > 0, "no language models are available");
-    let added = await askAgentOnNewThread(model, getChoiceIndex(model, "languageModel", "fresh", "background"),
-      "Smoke test: in one short sentence, what is this line about?");
-    console.log(`INFO thread comments: ${JSON.stringify(added.comments.map(c => [c.author.name, c.body]))}`);
-    await model.modifyReview(review => {
-      review.threads = review.threads.filter(t => t.id !== added.id);
+  await check("VS Code Chat: the MCP provider runs the bundled server with VS Code's Node.js in the repo folder",
+    async () => {
+      let launch = exports.vscodeChat.getServerLaunch();
+      console.log(`INFO MCP server launch: ${JSON.stringify(launch)}`);
+      assert.equal(launch?.cwd, model.repoRoot);
+      assert.equal(launch?.command, process.execPath);
+      assert.ok(launch?.args[0].endsWith(path.join("dist", "mcp-server.js")), `args ${launch?.args}`);
+      assert.ok((await exports.vscodeChat.getStatus()).server, "the provider is not registered");
     });
-    assert.ok(added.comments.at(-1)?.author.name.endsWith("(VS Code LM)"), "no answer from the model");
+  await check("VS Code Chat: VS Code starts the MCP server and lists its tools", async () => {
+    await Promise.race([vscode.commands.executeCommand("workbench.mcp.startServer",
+      "qwertie.branch-review-studio/branch-review-studio", { waitForLiveTools: true }), delay(30000)]);
+    let tools = vscode.lm.tools.filter(t => t.name.includes("review_"));
+    console.log(`INFO MCP tools: ${tools.map(t => t.name).join(", ")}; started at `
+      + (await exports.vscodeChat.getStatus()).lastStartTime?.toISOString());
+    assert.ok(tools.some(t => t.name.endsWith("review_reply")), "VS Code lists no review_reply tool");
   });
+  await check("VS Code Chat: VS Code registered the contributed skill and Branch Reviewer agent", async () => {
+    let files = await vscode.commands.executeCommand<{ uri: { path: string }, type: string, extensionId: string }[]>(
+      "_listExtensionPromptFiles");
+    let ours = files.filter(f => f.extensionId === "qwertie.branch-review-studio")
+      .map(f => `${f.type} ${f.uri.path.split("/").slice(-2).join("/")}`);
+    assert.deepEqual(ours.sort(), ["agent agents/branch-reviewer.agent.md", "skill branch-review-studio/SKILL.md"]);
+  });
+  await check("Ask Agent (VS Code Chat) starts a new local chat for the Branch Reviewer agent with the thread's lines",
+    async () => {
+      let calls: { command: string, args: unknown }[] = [];
+      let { executeCommand } = vscode.commands;
+      let interceptedCommands = ["workbench.action.chat.newLocalChat", "workbench.action.chat.open"];
+      vscode.commands.executeCommand = (async (command: string, ...rest: unknown[]) => {
+        let isIntercepted = interceptedCommands.includes(command);
+        if (isIntercepted)
+          calls.push({ command, args: rest[0] });
+        return isIntercepted ? undefined : await executeCommand(command, ...rest);
+      }) as typeof executeCommand;
+      let added;
+      try {
+        added = await askAgentOnNewThread(model, getChoiceIndex(model, "vscodeChat", "fresh", "interactive"),
+          "Smoke test: what is this line about?");
+      } finally {
+        vscode.commands.executeCommand = executeCommand;
+      }
+      await model.modifyReview(review => {
+        review.threads = review.threads.filter(t => t.id !== added.id);
+      });
+      console.log(`INFO chat commands: ${JSON.stringify(calls)}`);
+      assert.deepEqual(calls.map(c => c.command), interceptedCommands);
+      let args = calls[1].args as ChatOpenArgs<vscode.Uri>;
+      assert.equal(args.mode, "Branch Reviewer");
+      assert.equal(args.isPartialQuery, false);
+      assert.ok(args.query.includes(`review thread ${added.id}`) && args.query.includes("review_reply"), args.query);
+      assert.equal(args.attachFiles?.[0].uri.toString(), vscode.Uri.file(model.getFullPath(added.file)).toString());
+      assert.equal(args.attachFiles?.[0].range.startLineNumber, added.anchor.startLine);
+    });
 }
 
 /**

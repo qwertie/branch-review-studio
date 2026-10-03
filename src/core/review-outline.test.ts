@@ -5,8 +5,8 @@ import { ArrangedGroup, GroupLayout } from "./groups";
 import { DiffHunk } from "./hunks";
 import { createReview, ReviewThread, ThreadStatus } from "./review";
 import {
-  buildReviewOutline, findAdjacentThread, getGroupHeading, listChangesEntries, listThreadVisits, ReviewOutline,
-  ThreadPosition,
+  buildReviewOutline, findAdjacentThread, getGroupHeading, getWorkingTreeLine, listChangesEntries, listThreadVisits,
+  ReviewOutline, ThreadPosition,
 } from "./review-outline";
 
 /**
@@ -73,6 +73,18 @@ describe("buildReviewOutline and listThreadVisits", () => {
       .toEqual([[10, 10], [20, 20], [15, 25]]);
     expect(findAdjacentThread(outline, { file: "src/b.cs", line: 22 }, 1, false)?.visit.thread.thread.id)
       .toBe("s1");
+  });
+
+  it("gives a thread on a removed base line the working-tree line above it, or line 1", () => {
+    // Base lines 1 and 15-16 of src/b.cs were removed
+    let removedFirst = thread("r1", "src/b.cs", 1);
+    let removedLater = thread("r2", "src/b.cs", 16);
+    removedFirst.thread.side = removedLater.thread.side = "base";
+    let hunks = [{ oldStart: 1, oldCount: 1, newStart: 0, newLines: [] },
+      { oldStart: 15, oldCount: 2, newStart: 13, newLines: [] }];
+    let outline = createOutline(["src/b.cs"], [removedFirst, removedLater], undefined, new Map([["src/b.cs", hunks]]));
+    expect(outline.sections[0].files[0].threads.map(t => [t.position, getWorkingTreeLine(t)]))
+      .toEqual([[0.5, 1], [13 + 2 / 3, 13]]);
   });
 
   it("with groups, numbers the groups, lists files under each group, and visits each thread once", () => {

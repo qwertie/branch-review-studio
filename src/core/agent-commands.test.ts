@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  AgentChoice, buildLanguageModelPrompt, buildReviewPrompt, buildThreadPrompt, getAgentChoices, groupingInstructions,
+  AgentChoice, buildChatThreadPrompt, buildReviewPrompt, buildThreadPrompt, getAgentChoices, groupingInstructions,
   mcpServerName,
 } from "./agent-commands";
 import { createAnchor, splitLines } from "./anchoring";
@@ -56,29 +56,25 @@ describe("buildThreadPrompt", () => {
   });
 });
 
-describe("buildLanguageModelPrompt", () => {
-  it("includes the review summary, the thread's location, excerpt, nearby diff and messages, and the tools", () => {
+describe("buildChatThreadPrompt", () => {
+  it("names the branch, thread, lines and messages and asks for review_reply, without the summary", () => {
     let { review, thread, lines, location } = createSample();
 
-    let nearbyDiff = "@@ -12 +12 @@\n-old\n+line 12";
-    let prompt = buildLanguageModelPrompt({ review, thread, fileLines: lines, location }, nearbyDiff);
+    let prompt = buildChatThreadPrompt({ review, thread, fileLines: lines, location }, false);
 
     expect(prompt).toContain("branch `feature/x`");
-    expect(prompt).toContain("Overall the branch looks fine.");
-    expect(prompt).toContain("src/a.ts lines 12-13");
+    expect(prompt).toContain(`review thread ${thread.id}, which is about src/a.ts lines 12-13 in the working tree.`);
     expect(prompt).toContain(">   12 | line 12");
-    expect(prompt).toContain("```diff\n@@ -12 +12 @@\n-old\n+line 12\n```");
     expect(prompt).toContain("Claude (Major): This might divide by zero.");
     expect(prompt).toMatch(/New message from David:\s+Can it really\? Explain\./);
-    expect(prompt).toMatch(/read-only tools/);
-    expect(prompt).toMatch(/cannot edit files/);
-    expect(prompt).not.toContain("review_reply");
+    expect(prompt).toContain(`\`${mcpServerName}\` MCP tool \`review_reply\` with threadId "${thread.id}"`);
+    expect(prompt).not.toContain(review.summary);
   });
 
-  it("omits the diff section when there is no nearby diff", () => {
+  it("omits the excerpt when the file is attached", () => {
     let { review, thread, lines, location } = createSample();
-    expect(buildLanguageModelPrompt({ review, thread, fileLines: lines, location }, undefined))
-      .not.toContain("```diff");
+
+    expect(buildChatThreadPrompt({ review, thread, fileLines: lines, location }, true)).not.toContain("| line");
   });
 });
 
@@ -100,12 +96,15 @@ describe("getAgentChoices", () => {
       .toEqual(["codex fresh interactive", "codex fresh background"]);
   });
 
-  it("offers a VS Code language model last, only as a fresh background answer", () => {
+  it("offers VS Code's chat last, as a new interactive chat, and never forks a VS Code chat", () => {
     expect(describeChoices(getAgentChoices(["claude"], "claude", true))).toEqual([
       "claude fork interactive", "claude fork background", "claude fresh interactive", "claude fresh background",
-      "languageModel fresh background",
+      "vscodeChat fresh interactive",
     ]);
-    expect(describeChoices(getAgentChoices([], undefined, true))).toEqual(["languageModel fresh background"]);
+    expect(describeChoices(getAgentChoices(["claude"], "vscodeChat", true))).toEqual([
+      "claude fresh interactive", "claude fresh background", "vscodeChat fresh interactive",
+    ]);
+    expect(describeChoices(getAgentChoices([], "vscodeChat", true))).toEqual(["vscodeChat fresh interactive"]);
   });
 });
 

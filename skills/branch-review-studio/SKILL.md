@@ -5,9 +5,10 @@ description: Reviews the current git branch before it is merged - the working tr
 
 # Branch review (Branch Review Studio)
 
-You (Claude Code or Codex) review the branch checked out in your project folder, post the
-findings to Branch Review Studio, and summarize them in chat. Branch Review Studio is a VS Code
-extension in which the developer reads findings as comment threads on the diff and answers them.
+You (Claude Code, Codex, or an agent in VS Code's chat) review the branch checked out in your
+project folder, post the findings to Branch Review Studio, and summarize them in chat. Branch
+Review Studio is a VS Code extension in which the developer reads findings as comment threads on
+the diff and answers them.
 Its MCP server (`branch-review-studio`) provides `review_begin`, `review_comment`,
 `review_set_groups`, `review_reply`, `review_resolve`, `review_list` and `review_finish`, which act
 on the branch checked out in your project folder. If those tools are not available, do the review
@@ -167,19 +168,20 @@ Read the diff and the full files around it yourself; don't rely on summaries.
 each candidate against the code and drop any you can't back with a concrete scenario or a quoted
 rule.
 
-**Thorough mode:** if you can launch subagents (e.g. Claude Code's Agent tool), launch five
-reviewers in parallel, one per dimension, and brief each like a colleague: the merge-base SHA and
-the diff commands from Step 1, the `--numstat` summary, the user's context, the already-raised
-set, the threshold verbatim, and the output format. They read the diff and files themselves;
-don't pre-summarize. An empty answer is valid. When they return, run one verifier per Critical or
-Major candidate (in parallel) that gets the candidate, the diff and the relevant files, and
-answers exactly one of: **CONFIRMED** (names the triggering inputs/state and the wrong result,
-quoting the line), **PLAUSIBLE** (the mechanism is real, the trigger is uncertain; says what
-would confirm it) or **REFUTED** (the code doesn't say that, or a guard elsewhere handles it,
-quoting the line). Keep CONFIRMED and PLAUSIBLE; label PLAUSIBLE ones "possible". Finally, make
-one more pass as a fresh reviewer who has the list, looking only for what's missing: moved or
-extracted code that dropped a guard, setup/teardown asymmetry in tests, flipped config defaults.
-Without subagents, do all of these passes yourself, in sequence, and say so in the summary.
+**Thorough mode:** if you can launch subagents (e.g. Claude Code's Agent tool or VS Code's
+`runSubagent` tool), launch five reviewers in parallel, one per dimension, and brief each like a
+colleague: the merge-base SHA and the diff commands from Step 1, the `--numstat` summary, the
+user's context, the already-raised set, the threshold verbatim, and the output format. They read
+the diff and files themselves; don't pre-summarize. An empty answer is valid. When they return,
+run one verifier per Critical or Major candidate (in parallel) that gets the candidate, the diff
+and the relevant files, and answers exactly one of: **CONFIRMED** (names the triggering
+inputs/state and the wrong result, quoting the line), **PLAUSIBLE** (the mechanism is real, the
+trigger is uncertain; says what would confirm it) or **REFUTED** (the code doesn't say that, or a
+guard elsewhere handles it, quoting the line). Keep CONFIRMED and PLAUSIBLE; label PLAUSIBLE ones
+"possible". Finally, make one more pass as a fresh reviewer who has the list, looking only for
+what's missing: moved or extracted code that dropped a guard, setup/teardown asymmetry in tests,
+flipped config defaults. Without subagents, do all of these passes yourself, in sequence, and say
+so in the summary.
 
 ### Grouping (in parallel with the reviewers, or after your own review)
 

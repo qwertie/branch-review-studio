@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { mapBaseLineToWorkingTree, readDiffHunks } from "../core/hunks";
 import { truncateText } from "../core/markdown-subset";
 import {
-  findAdjacentThread, getViewGroupId, listThreadVisits, ThreadPosition, ThreadVisit,
+  findAdjacentThread, getViewGroupId, getWorkingTreeLine, listThreadVisits, ThreadPosition, ThreadVisit,
 } from "../core/review-outline";
 import { getThreadText } from "../core/review-view-html";
 import { baseScheme, getReviewFileOfUri } from "./base-content";
@@ -99,13 +99,15 @@ export class ThreadNavigator implements vscode.Disposable {
 
   /**
    * Gets the position from which to navigate: the cursor (see getCursorPosition), else the last
-   * thread revealed. If the cursor is at the start of the last thread revealed, the position is
-   * that thread, which tells it apart from other threads that start on the same line.
+   * thread revealed. If the cursor is at the start of the last thread revealed (on its side of the
+   * diff, or on the modified side at getWorkingTreeLine), the position is that thread, which tells
+   * it apart from other threads that start on the same line.
    */
   private async getPosition(): Promise<ThreadPosition | undefined> {
     let lastVisit = listThreadVisits(this.model.snapshot.outline).find(v => v.thread.thread.id === this.lastThreadId);
     let cursor = await this.getCursorPosition();
-    let isAtLastThread = cursor?.file === lastVisit?.file.path && cursor?.line === lastVisit?.thread.position;
+    let isAtLastThread = lastVisit !== undefined && cursor?.file === lastVisit.file.path
+      && [lastVisit.thread.position, getWorkingTreeLine(lastVisit.thread)].includes(cursor.line);
     return cursor && !isAtLastThread ? cursor : lastVisit && { threadId: lastVisit.thread.thread.id };
   }
 

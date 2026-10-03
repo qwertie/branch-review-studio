@@ -5,7 +5,9 @@ import * as vscode from "vscode";
 import { mcpServerName } from "../core/agent-commands";
 import { AgentCommand, AgentIntegration, runAgentCommand } from "../core/agent-integration";
 import { getErrorMessage, readFileIfExists } from "../core/files";
-import { agentIntegrations, AgentServices, findAgentCommand, getBundledServerPath } from "./agents";
+import {
+  agentIntegrations, AgentServices, findAgentCommand, getBundledServerPath, getBundledSkillPath,
+} from "./agents";
 
 /**
  * Stable per-user copy of dist/mcp-server.js. Agents' registrations point here rather than into the
@@ -123,8 +125,7 @@ async function installSkillForAgent(context: vscode.ExtensionContext, integratio
   : Promise<string> {
   let skillDir = integration.getSkillDir(os.homedir());
   await fs.mkdir(skillDir, { recursive: true });
-  await fs.copyFile(path.join(context.extensionPath, "skills", mcpServerName, "SKILL.md"),
-    path.join(skillDir, "SKILL.md"));
+  await fs.copyFile(getBundledSkillPath(context), path.join(skillDir, "SKILL.md"));
   return skillDir;
 }
 

@@ -229,6 +229,30 @@ describe("identifyCaller", () => {
       .toMatchObject({ sessionId: undefined, agent: "codex" });
   });
 
+  it("identifies VS Code's chat by the conversation id in the request's _meta, or by the server's environment", () => {
+    // _meta that VS Code 1.140 sends with a tools/call request from a chat
+    let meta = { progressToken: "p-1", "vscode.conversationId": "chat-1", "vscode.requestId": "r-1",
+      traceparent: "00-a-b-01" };
+    expect(identifyCaller("D:/r", meta, { CLAUDE_CODE_SESSION_ID: "c-1" }, "Visual Studio Code"))
+      .toEqual({ cwd: "D:/r", sessionId: "chat-1", agent: "vscodeChat", agentName: "VS Code Chat" });
+    expect(identifyCaller("D:/r", { progressToken: 1 }, { BRS_MCP_CLIENT: "vscodeChat" }, "Visual Studio Code"))
+      .toEqual({ cwd: "D:/r", sessionId: undefined, agent: "vscodeChat", agentName: "VS Code Chat" });
+  });
+
+  it("records a VS Code chat's replies as a follow-up session of agent 'vscodeChat'", async () => {
+    let repo = createFeatureRepo();
+    await createTools(repo).addReviewComment({ file: "src/a.ts", line: 3, severity: "Major", body: "Why 2?" });
+    let threadId = (await readReview(repo)).threads[0].id;
+
+    await new ReviewTools(identifyCaller(repo.root, { "vscode.conversationId": "chat-1" }, {}, undefined))
+      .replyToThread({ threadId, body: "Because." });
+
+    let review = await readReview(repo);
+    expect(review.sessions.at(-1)).toMatchObject({ sessionId: "chat-1", agent: "vscodeChat", role: "followup" });
+    expect(review.threads[0].comments.at(-1)).toMatchObject({ author: { kind: "agent", name: "VS Code Chat" },
+      sessionId: "chat-1" });
+  });
+
   it("identifies Claude Code by CLAUDE_CODE_SESSION_ID otherwise", () => {
     expect(identifyCaller("D:/r", { progressToken: 1 }, { CLAUDE_CODE_SESSION_ID: "c-1" }, "claude-code"))
       .toEqual({ cwd: "D:/r", sessionId: "c-1", agent: "claude", agentName: "Claude" });

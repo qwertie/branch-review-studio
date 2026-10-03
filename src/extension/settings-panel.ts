@@ -8,21 +8,18 @@ import { AgentIntegration, runAgentCommand } from "../core/agent-integration";
 import { getErrorMessage } from "../core/files";
 import { getBaseBranchChoices, listBranches } from "../core/git";
 import { checkIntegrationStatus, IntegrationStatus, isIntegrationAvailable } from "../core/integration-status";
-import { getModelPreference, languageModelDisplayName } from "../core/language-model";
 import { escapeHtml } from "../core/markdown-subset";
-import { formatCount, IntegrationId } from "../core/review";
+import { IntegrationId } from "../core/review";
+import { chatAgentName, vscodeChatDisplayName } from "../core/vscode-chat";
 import { agentIntegrations, AgentServices, codexExtensionId, findAgentCommand } from "./agents";
 import { changeBaseBranchIfConfirmed } from "./change-base-branch";
 import { installForAgent, uninstallForAgent } from "./install";
-import {
-  checkLanguageModelStatus, chooseLanguageModel, getLanguageModelSetting, LanguageModelStatus,
-  noLanguageModelsMessage,
-} from "./language-models";
 import { BranchReviewModel } from "./model";
+import { VscodeChatIntegration, VscodeChatStatus } from "./vscode-chat";
 
 /** A message that the panel's webview script posts when the user clicks a button. */
 interface PanelMessage {
-  command: "changeBaseBranch" | "copyReviewPrompt" | "recheck" | "install" | "uninstall" | "chooseModel";
+  command: "changeBaseBranch" | "copyReviewPrompt" | "recheck" | "install" | "uninstall";
   /** The agent of the integration whose button was clicked */
   agent?: string;
   /** The base branch selected in the panel */
@@ -33,30 +30,19 @@ interface PanelMessage {
  * The "Branch Review Studio" panel (a webview in the editor area, since VS Code has no rich modal
  * dialogs). It explains how to start a review, lets the user change the base branch, and shows
  * the status of each agent integration, which it checks when it opens and on Re-check, and of VS
- * Code's language models, which it also checks when they or the chosen model change.
+ * Code's chat.
  */
 export class SettingsPanel {
   private static current: SettingsPanel | undefined;
   /** Status of each integration; undefined while checking */
   private statuses: IntegrationStatus[] | undefined;
-  /** Status of the VS Code Language Models integration; undefined while checking */
-  private languageModelStatus: LanguageModelStatus | undefined;
-  /** What the language model section showed when last rendered (see getLanguageModelState) */
-  private renderedLanguageModelState = "";
   /** What the branch section showed when last rendered (see getBranchState) */
   private renderedBranchState = "";
 
   private constructor(private readonly panel: vscode.WebviewPanel, private readonly model: BranchReviewModel
-    | undefined, private readonly services: AgentServices) {
+    | undefined, private readonly services: AgentServices, private readonly vscodeChat: VscodeChatIntegration) {
     let subscriptions = [panel.webview.onDidReceiveMessage((message: PanelMessage) => this.handleMessage(message)
-      .catch(e => void vscode.window.showErrorMessage(getErrorMessage(e)))),
-      vscode.workspace.onDidChangeConfiguration(e => {
-        if (e.affectsConfiguration("branchReviewStudio.languageModel"))
-          void this.checkLanguageModels();
-      })];
-    // Editors based on VS Code may lack the Language Model API
-    if (vscode.lm?.onDidChangeChatModels)
-      subscriptions.push(vscode.lm.onDidChangeChatModels(() => void this.checkLanguageModels()));
+      .catch(e => void vscode.window.showErrorMessage(getErrorMessage(e))))];
     if (model) {
       subscriptions.push(model.onDidChange(() => {
         // Re-rendering resets the scroll position, so it happens only if the branch section changes
@@ -71,13 +57,14 @@ export class SettingsPanel {
   }
 
   /** Shows the panel (creating it if needed) and checks the integrations' status. */
-  static show(model: BranchReviewModel | undefined, services: AgentServices): void {
+  static show(model: BranchReviewModel | undefined, services: AgentServices, vscodeChat: VscodeChatIntegration)
+    : void {
     if (SettingsPanel.current) {
       SettingsPanel.current.panel.reveal();
     } else {
       let panel = vscode.window.createWebviewPanel("branchReviewStudio.settings", "Branch Review Studio",
         vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [] });
-      SettingsPanel.current = new SettingsPanel(panel, model, services);
+      SettingsPanel.current = new SettingsPanel(panel, model, services, vscodeChat);
     }
     void SettingsPanel.current.checkStatuses();
   }
@@ -94,20 +81,10 @@ export class SettingsPanel {
 
   private async checkStatuses(): Promise<void> {
     this.statuses = undefined;
-    this.languageModelStatus = undefined;
     await this.render();
-    [this.statuses, this.languageModelStatus] = await Promise.all([Promise.all(agentIntegrations.map(integration =>
-      checkIntegrationStatus(integration, findAgentCommand(integration), runAgentCommand))),
-    checkLanguageModelStatus(this.services.context)]);
+    this.statuses = await Promise.all(agentIntegrations.map(integration =>
+      checkIntegrationStatus(integration, findAgentCommand(integration), runAgentCommand)));
     await this.render();
-  }
-
-  /** Checks the language models again, and re-renders if the result differs from what is shown. */
-  private async checkLanguageModels(): Promise<void> {
-    this.languageModelStatus = await checkLanguageModelStatus(this.services.context);
-    // Re-rendering resets the scroll position, and the models may change often (e.g. as extensions load)
-    if (getLanguageModelState(this.languageModelStatus) !== this.renderedLanguageModelState)
-      await this.render();
   }
 
   private async handleMessage(message: PanelMessage): Promise<void> {
@@ -119,11 +96,10 @@ export class SettingsPanel {
         await changeBaseBranchIfConfirmed(model, message.baseBranch);
     } else if (message.command === "copyReviewPrompt" && model?.snapshot.branch) {
       await vscode.env.clipboard.writeText(buildReviewPrompt(model.snapshot.branch, model.baseBranch));
-      void vscode.window.showInformationMessage("Copied the review prompt. Paste it into Claude Code or Codex.");
+      void vscode.window.showInformationMessage("Copied the review prompt. Paste it into Claude Code, Codex or VS "
+        + "Code's chat.");
     } else if (message.command === "recheck") {
       await this.checkStatuses();
-    } else if (message.command === "chooseModel") {
-      await chooseLanguageModel();
     } else if ((message.command === "install" || message.command === "uninstall") && integration) {
       await (message.command === "install" ? installForAgent : uninstallForAgent)(this.services, integration);
       await this.checkStatuses();
@@ -133,12 +109,11 @@ export class SettingsPanel {
   private async render(): Promise<void> {
     let nonce = randomBytes(16).toString("hex");
     this.renderedBranchState = this.getBranchState();
-    this.renderedLanguageModelState = getLanguageModelState(this.languageModelStatus);
     let branchSection = this.model ? await this.renderBranchSection(this.model)
       : "<p>No workspace folder is in a git repo.</p>";
     let integrationRows = agentIntegrations.map(i => this.renderIntegration(i, this.statuses?.find(s => s.agent
       === i.agent))).join("\n");
-    let languageModelSection = this.renderLanguageModelIntegration(this.languageModelStatus);
+    let vscodeChatSection = this.renderVscodeChatIntegration(await this.vscodeChat.getStatus());
     // The user may have closed the panel during the awaits
     if (SettingsPanel.current === this) {
       this.panel.webview.html = `<!DOCTYPE html>
@@ -156,7 +131,7 @@ ${renderHowTo(this.model)}
 ${branchSection}
 <h2>Integrations <button class="secondary" data-command="recheck">Re-check</button></h2>
 ${integrationRows}
-${languageModelSection}
+${vscodeChatSection}
 <script nonce="${nonce}">${script}</script>
 </body>
 </html>`;
@@ -211,42 +186,46 @@ ${renderTable(rows)}
   }
 
   /**
-   * Renders the section of the VS Code Language Models integration: what it can and can't do, and
-   * its status. Nothing needs to be installed for it, so it has no Install button.
+   * Renders the section of the VS Code Chat integration: what it can and can't do, and its status.
+   * The extension registers the MCP server with VS Code and contributes the skill, so the section
+   * has no Install button.
    */
-  private renderLanguageModelIntegration(status: LanguageModelStatus | undefined): string {
-    let setting = getLanguageModelSetting();
-    let selected = status?.selected;
-    let summary = status === undefined ? "Checking…" : selected
-      ? `<span class="ok">✔ ${formatCount(status.models.length, "model")} available</span>`
-      : `<span class="error">✘ No models available</span>`;
+  private renderVscodeChatIntegration(status: VscodeChatStatus): string {
+    let { server, skillCopy } = status;
+    let summary = server ? `<span class="ok">✔ MCP server registered</span>`
+      : `<span class="error">✘ MCP server not registered</span>`;
+    let skill = !status.areSkillsEnabled
+      ? `<span class="error">off</span>: VS Code's setting <code>chat.useAgentSkills</code> is false`
+      : skillCopy === undefined ? `<span class="ok">provided</span> by this extension`
+        : `VS Code uses your copy <code>${escapeHtml(skillCopy.path)}</code>, since skills in your skill folders take `
+          + "precedence over skills that extensions provide; " + (skillCopy.isCurrent ? "it is this version's skill"
+            : `<span class="error">it differs from this version's skill</span> (to update a copy that this extension `
+              + "installed, click Install MCP Server and Skill above)");
     let rows = [
-      ["Language Model API", status === undefined ? "…" : status.isApiAvailable
-        ? `<span class="ok">available</span> (<code>vscode.lm</code>)`
-        : `<span class="error">not available</span> in this editor`],
-      ["Models", status === undefined ? "…" : status.models.length === 0
-        ? `<span class="error">none</span>. ${escapeHtml(noLanguageModelsMessage)}`
-        : status.models.map(m => escapeHtml(`${m.name} (${m.vendor})`)).join(", ")],
-      ["Selected model", (selected
-        ? `${escapeHtml(selected.name)} <code>${escapeHtml(getModelPreference(selected))}</code>` : "none")
-        + `<br><span class="dim">Setting <code>branchReviewStudio.languageModel</code>: ${setting
-          ? `<code>${escapeHtml(setting)}</code>` : "not set, so the first available model is used"}</span>`],
-      ["Permission granted", status === undefined ? "…" : selected === undefined ? "(no model)"
-        : status.canSendRequest === undefined ? "not asked yet (VS Code asks when Ask Agent first uses the model)"
-          : formatYesNo(status.canSendRequest)],
-      ["Last error", this.formatLastError("languageModel")],
+      [`MCP server <code>${mcpServerName}</code>`, server
+        ? `<span class="ok">registered</span>: VS Code runs <code>${escapeHtml([server.command, ...server.args]
+          .join(" "))}</code> in <code>${escapeHtml(server.cwd)}</code>`
+        : `<span class="error">${escapeHtml(status.registrationProblem ?? "unknown problem")}</span>`],
+      ["Server process", (status.lastStartTime ? `VS Code started it at ${status.lastStartTime.toLocaleTimeString()}`
+        : "not started yet in this window: VS Code starts it when a chat needs its tools")
+        + " (<b>MCP: List Servers</b> shows its state)"],
+      ["Trust", "VS Code trusts MCP servers that extensions provide without asking; in Restricted Mode, it asks you "
+        + "to trust the workspace first"],
+      [`Skill <code>${mcpServerName}</code>`, skill],
+      [`Agent <code>${escapeHtml(chatAgentName)}</code>`, "provided by this extension"],
+      ["Last error", this.formatLastError("vscodeChat")],
     ];
     return `<div class="integration">
-<h3>${languageModelDisplayName} — ${summary}</h3>
-<p>Models that VS Code provides can answer comment threads (<b>Ask Agent</b>), reading this repo's code with
-  read-only tools: read, search and list files, and see the branch's diff. They <b>can't</b> run branch reviews (the
-  review skill needs Claude Code or Codex), edit files, run commands, or fork review sessions (each answer is a
-  new conversation, without a session, that gets the thread's earlier messages). They don't use your Claude Code
-  or ChatGPT subscription: the models come from GitHub Copilot, from API keys you add with <b>Manage Models</b> in
-  the Chat view's model picker, or from other extensions.</p>
+<h3>${vscodeChatDisplayName} — ${summary}</h3>
+<p>VS Code's chat in agent mode (its own agent, with the models you've enabled there: GitHub Copilot, API keys
+  you add with <b>Manage Models</b>, or other providers; <b>not</b> your Claude Code or ChatGPT subscription) can
+  run full branch reviews and answer threads, with this extension's review tools. Nothing needs to be installed:
+  pick the <b>${escapeHtml(chatAgentName)}</b> agent in the chat, or type <code>/${mcpServerName}</code>.
+  <b>Ask Agent</b>'s ${vscodeChatDisplayName} choice opens a new chat with your message; the answer appears in the
+  thread when the agent calls <code>review_reply</code>. VS Code can't fork chats, so it can't continue the reviewing
+  chat. VS Code's built-in Claude and Codex agents don't use this; they use the Claude Code and Codex registrations
+  above.</p>
 ${renderTable(rows)}
-<button data-command="chooseModel">Choose Model…</button>
-<button class="secondary" data-command="recheck">Re-check</button>
 </div>`;
   }
 
@@ -268,20 +247,24 @@ function renderHowTo(model: BranchReviewModel | undefined): string {
   return `<h2>How to run a review connected to this extension</h2>
 <ol>
 <li><b>Prerequisite:</b> the review tools (the <code>${mcpServerName}</code> MCP server) must be registered with the
-  agent you'll use: click <b>Install MCP Server and Skill</b> in its section under Integrations below. That also
-  installs the skill, a full branch-review workflow (tests, branch tracking, correctness, security, performance,
-  conventions and dependency checks) that posts its findings with those tools (${skillDirs}).</li>
+  agent you'll use. For Claude Code or Codex, click <b>Install MCP Server and Skill</b> in its section under
+  Integrations below. That also installs the skill, a full branch-review workflow (tests, branch tracking,
+  correctness, security, performance, conventions and dependency checks) that posts its findings with those tools
+  (${skillDirs}). VS Code's chat needs no install: this extension registers the tools and provides the skill and the
+  <b>${escapeHtml(chatAgentName)}</b> agent (see ${vscodeChatDisplayName} below).</li>
 <li><b>Start the review:</b> open Claude Code (CLI, VS Code extension or T3 Code) or Codex (CLI, VS Code extension
   or app) in ${folder}, then run the skill (<code>/${mcpServerName}</code> in Claude Code,
   <code>$${mcpServerName}</code> in Codex) or paste the review prompt.${copyButton}
+  Or, in VS Code's chat in agent mode, pick the <b>${escapeHtml(chatAgentName)}</b> agent or type
+  <code>/${mcpServerName}</code>; it uses the models you've enabled in VS Code.
   The skill reviews in a single context; add "be thorough" (or <code>--thorough</code>) for a review by
   parallel sub-agents, which costs several times as many tokens. If the repo has its own review command
-  that posts to Branch Review Studio (e.g. Barreleye's <code>/branch-review</code>), you can use that
-  instead. Reviews need Claude Code or Codex: VS Code language models can only answer threads.</li>
+  that posts to Branch Review Studio (e.g. a <code>/branch-review</code> command), you can use that
+  instead.</li>
 <li><b>Then:</b> the agent's findings appear as comment threads in the Branch Review view as it posts them, and
   if it posts groups of related changes, the view lists the files under their groups. Answer with <b>Reply</b>, or
   with <b>Ask Agent</b> to send your message to a fork of the reviewing session (with the same agent), to a fresh
-  session, or to a VS Code language model (answers only, with read-only access to the repo).</li>
+  session, or to a new chat in VS Code's chat.</li>
 </ol>`;
 }
 
@@ -294,13 +277,6 @@ async function getBaseBranchOptions(model: BranchReviewModel): Promise<string[]>
 /** Renders a two-column table of rows' names and values (HTML). */
 function renderTable(rows: string[][]): string {
   return `<table>${rows.map(([name, value]) => `<tr><th>${name}</th><td>${value}</td></tr>`).join("\n")}</table>`;
-}
-
-/** Gets what the language model section shows, as a string, to detect changes. */
-function getLanguageModelState(status: LanguageModelStatus | undefined): string {
-  return JSON.stringify(status && [getLanguageModelSetting(), status.isApiAvailable,
-    status.models.map(getModelPreference), status.selected && getModelPreference(status.selected),
-    status.canSendRequest]);
 }
 
 /** Describes the Codex VS Code extension's installation for the Codex integration's section. */

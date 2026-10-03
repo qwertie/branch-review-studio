@@ -59,11 +59,10 @@ export async function findMergeBase(repoRoot: string, baseBranch: string): Promi
  * Lists files whose working-tree content (including staged, unstaged and untracked changes)
  * differs from `mergeBase`, sorted by path.
  */
-export async function getChangedFiles(repoRoot: string, mergeBase: string, options?: GitRunOptions)
-  : Promise<ChangedFile[]> {
+export async function getChangedFiles(repoRoot: string, mergeBase: string): Promise<ChangedFile[]> {
   let [diffOutput, untrackedOutput] = await Promise.all([
-    runGit(repoRoot, ["diff", "--name-status", "-z", "-M", "--no-ext-diff", mergeBase, "--"], options),
-    runGit(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z"], options),
+    runGit(repoRoot, ["diff", "--name-status", "-z", "-M", "--no-ext-diff", mergeBase, "--"]),
+    runGit(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z"]),
   ]);
   let files = parseNameStatus(diffOutput);
   for (let untrackedPath of splitNul(untrackedOutput))
@@ -203,33 +202,16 @@ export function parseBranchRefs(refNames: string[]): BranchInfo[] {
   return [...branches.values()];
 }
 
-/** Options of runGit. */
-export interface GitRunOptions {
-  /** Nonzero exit codes that don't count as failures, e.g. 1 from `git grep` when nothing matches */
-  acceptedExitCodes?: number[];
-  /** Time after which git is killed, in milliseconds; unlimited by default */
-  timeoutMs?: number;
-  /** Kills git when aborted */
-  signal?: AbortSignal;
-}
-
-/**
- * Runs git without a shell and returns stdout; throws GitError on a nonzero exit code (other than
- * `options.acceptedExitCodes`), and when git is killed by the timeout or the abort signal.
- */
-export function runGit(cwd: string, args: string[], options: GitRunOptions = {}): Promise<string> {
-  let { acceptedExitCodes = [], timeoutMs, signal } = options;
+/** Runs git without a shell and returns stdout; throws GitError on a nonzero exit code. */
+export function runGit(cwd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile("git", ["-c", "core.quotepath=false", ...args],
-      { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, windowsHide: true, timeout: timeoutMs, signal },
+      { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, windowsHide: true },
       (error, stdout, stderr) => {
-        if (error && !(typeof error.code === "number" && acceptedExitCodes.includes(error.code))) {
-          let problem = error.name === "AbortError" ? "was cancelled" : error.killed
-            ? `timed out after ${timeoutMs} ms` : `failed: ${stderr.trim() || error.message}`;
-          reject(new GitError(`git ${args.join(" ")} ${problem}`));
-        } else {
+        if (error)
+          reject(new GitError(`git ${args.join(" ")} failed: ${stderr.trim() || error.message}`));
+        else
           resolve(stdout);
-        }
       });
   });
 }

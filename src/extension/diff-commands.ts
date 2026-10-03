@@ -2,7 +2,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { getErrorMessage } from "../core/files";
 import { ChangedFile, fetchBranch } from "../core/git";
-import { ChangesEntry, listChangesEntries } from "../core/review-outline";
+import { ChangesEntry, getWorkingTreeLine, listChangesEntries, listThreadVisits } from "../core/review-outline";
 import { getBaseUri, getGroupViewUri, getHeadingUri } from "./base-content";
 import { ReviewCommentController } from "./comments";
 import { BranchReviewModel } from "./model";
@@ -66,7 +66,13 @@ export async function revealThread(model: BranchReviewModel, comments: ReviewCom
     comments.expandThread(threadId);
     let start = new vscode.Position(location.startLine - 1, 0);
     let isModifiedSide = thread.side === "modified";
-    await openFileDiff(model, thread.file, isModifiedSide ? new vscode.Range(start, start) : undefined,
+    // A selection on the modified side, even for a thread on the base side, keeps the diff editor
+    // from moving that side's cursor to the first change, from where thread navigation would
+    // continue if that side had the focus
+    let outlineThread = listThreadVisits(model.snapshot.outline).find(v => v.thread.thread.id === threadId)?.thread;
+    let modifiedLine = outlineThread ? getWorkingTreeLine(outlineThread) : location.startLine;
+    let modifiedStart = new vscode.Position(modifiedLine - 1, 0);
+    await openFileDiff(model, thread.file, new vscode.Range(modifiedStart, modifiedStart),
       isModifiedSide ? viewGroupId : undefined);
     let uri = comments.getThreadUri(thread, model.snapshot)?.toString();
     let editor = [vscode.window.activeTextEditor, ...vscode.window.visibleTextEditors]

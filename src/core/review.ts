@@ -86,12 +86,15 @@ export interface GroupedHunk {
   groupIds: string[];
 }
 
-/** An agent session (Claude Code session or Codex thread) that contributed to a review. */
+/**
+ * An agent session (Claude Code session, Codex thread or VS Code chat) that contributed to a
+ * review.
+ */
 export interface ReviewSession {
-  /** Claude Code session id, or Codex thread id */
+  /** Claude Code session id, Codex thread id, or VS Code chat session id */
   sessionId: string;
-  /** Agent that ran the session; only that agent can fork it */
-  agent: AgentKind;
+  /** Agent that ran the session; only that agent can fork it, and VS Code chats can't be forked */
+  agent: IntegrationId;
   /** Project folder the session ran in; `claude --resume` looks up sessions per project folder */
   cwd: string;
   /** 'review' = the session that produced the review; 'followup' = a session answering a thread */
@@ -103,10 +106,11 @@ export type SessionRole = "review" | "followup";
 /** The agents that Branch Review Studio can run: Claude Code and OpenAI Codex. */
 export type AgentKind = "claude" | "codex";
 /**
- * Something that can answer threads: an agent CLI, or 'languageModel' = a model from VS Code's
- * Language Model API (see language-model.ts), which can't review branches or hold sessions.
+ * Something that can review branches and answer threads through the MCP server: an agent CLI, or
+ * 'vscodeChat' = VS Code's chat in agent mode (see vscode-chat.ts), which runs the server through
+ * this extension and whose chats can't be forked or resumed.
  */
-export type IntegrationId = AgentKind | "languageModel";
+export type IntegrationId = AgentKind | "vscodeChat";
 /** Severities that an agent can give a finding, most severe first. */
 export const severities = ["Critical", "Major", "Minor", "Note"] as const;
 export type Severity = typeof severities[number];
@@ -213,8 +217,8 @@ export function getThread(review: Review, threadId: string): ReviewThread {
 }
 
 /** Adds a session to `review.sessions` (in place) unless a session with that id is there. */
-export function recordSession(review: Review, sessionId: string, cwd: string, role: SessionRole, agent: AgentKind)
-  : void {
+export function recordSession(review: Review, sessionId: string, cwd: string, role: SessionRole,
+  agent: IntegrationId): void {
   if (!review.sessions.some(s => s.sessionId === sessionId))
     review.sessions.push({ sessionId, agent, cwd, role, createdAt: new Date().toISOString() });
 }
