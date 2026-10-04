@@ -26,3 +26,17 @@ No questions were asked. Assumptions made without asking:
 
 Tests: vitest 168 passed; tsc clean; the smoke test in VS Code (sandbox repo) passed, including
 the new check. The button itself wasn't clicked by a test, since it opens a File Explorer window.
+
+## Follow-up: open the file in VS Code instead
+
+User:
+
+> oh if it's just one file it's would actually be better to open it in VS Code I think
+
+The button is now **Open Review File** (`vscode.window.showTextDocument`), shown only once the
+branch has a review; the File Explorer button and its fallback to the store's folder were removed.
+The smoke-test check now clicks the button and checks that the review file is the active editor;
+it passed. In the same smoke-test runs, "Ctrl+Enter in a new comment box clicks its primary
+button" failed ("the text went into the file instead of the comment box"); it also failed on the
+previous commit (e60ecf7), which had passed earlier, so the failure depends on the environment
+(the comment box apparently needs the test window to have OS focus), not on this change.

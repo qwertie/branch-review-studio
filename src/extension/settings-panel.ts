@@ -23,7 +23,7 @@ import { VscodeChatIntegration, VscodeChatStatus } from "./vscode-chat";
 /** A message that the panel's webview script posts when a button is clicked or a value picked. */
 interface PanelMessage {
   command: "changeBaseBranch" | "copyReviewPrompt" | "recheck" | "install" | "uninstall" | "setAskAgentDefault"
-    | "revealReviewFile";
+    | "openReviewFile";
   /** The agent of the integration whose button was clicked */
   agent?: string;
   /** The base branch selected in the panel */
@@ -115,8 +115,8 @@ export class SettingsPanel {
       await vscode.env.clipboard.writeText(buildReviewPrompt(model.snapshot.branch, model.baseBranch));
       void vscode.window.showInformationMessage("Copied the review prompt. Paste it into Claude Code, Codex or VS "
         + "Code's chat.");
-    } else if (message.command === "revealReviewFile" && model) {
-      await revealReviewFile(model);
+    } else if (message.command === "openReviewFile" && model?.snapshot.branch) {
+      await vscode.window.showTextDocument(vscode.Uri.file(model.store.getReviewPath(model.snapshot.branch)));
     } else if (message.command === "recheck") {
       await this.checkStatuses();
     } else if ((message.command === "install" || message.command === "uninstall") && integration) {
@@ -183,15 +183,15 @@ ${vscodeChatSection}
     let mergeBaseText = mergeBase ? `<code>${mergeBase.mergeBaseSha.slice(0, 10)}</code> (merge-base of HEAD and `
       + `${escapeHtml(mergeBase.baseRef)})` : `<span class="error">${escapeHtml(mergeBaseError ?? "unknown")}</span>`;
     let reviewFileText = branch === undefined ? "none (detached HEAD)"
-      : `<code>${escapeHtml(model.store.getReviewPath(branch))}</code>${review ? "" : " (not created yet)"}`;
+      : `<code>${escapeHtml(model.store.getReviewPath(branch))}</code> ` + (review
+        ? `<button class="secondary" data-command="openReviewFile">Open Review File</button>` : "(not created yet)");
     return `<table>
 <tr><th>Folder</th><td><code>${escapeHtml(model.repoRoot)}</code></td></tr>
 <tr><th>Branch</th><td><code>${escapeHtml(branch ?? "(detached HEAD)")}</code></td></tr>
 <tr><th>Base branch</th><td><select id="baseBranch" data-base="${escapeHtml(baseBranch)}">${options.join("")}</select>
   <button data-command="changeBaseBranch">Change Base Branch</button></td></tr>
 <tr><th>Merge-base</th><td>${mergeBaseText}</td></tr>
-<tr><th>Review file</th><td>${reviewFileText}
-  <button class="secondary" data-command="revealReviewFile">${revealInOSLabel}</button></td></tr>
+<tr><th>Review file</th><td>${reviewFileText}</td></tr>
 </table>`;
   }
 
@@ -343,22 +343,7 @@ async function getBaseBranchOptions(model: BranchReviewModel): Promise<string[]>
     model.snapshot.branch);
 }
 
-/**
- * Shows the current branch's review file in the OS file manager (Explorer, Finder, ...) or, if it
- * doesn't exist yet, the innermost review-store folder that exists.
- */
-async function revealReviewFile(model: BranchReviewModel): Promise<void> {
-  let { store, snapshot: { branch } } = model;
-  let target = [branch && store.getReviewPath(branch), store.reviewsDir, store.dir].find(f => f && fs.existsSync(f));
-  if (target)
-    await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(target));
-  else
-    void vscode.window.showInformationMessage(`There is no review yet; reviews will be stored in ${store.dir}.`);
-}
 
-/** Label of VS Code's revealFileInOS command on this platform, for renderBranchSection */
-const revealInOSLabel = process.platform === "win32" ? "Show in File Explorer"
-  : process.platform === "darwin" ? "Reveal in Finder" : "Open Containing Folder";
 
 /** Renders a two-column table of rows' names and values (HTML). */
 function renderTable(rows: string[][]): string {

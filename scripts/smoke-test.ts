@@ -195,10 +195,13 @@ export async function run(): Promise<void> {
     });
   if (model?.snapshot.branch) {
     let reviewPath = model.store.getReviewPath(model.snapshot.branch);
-    await check("the panel's Branch section shows the review file and a button that reveals it", () => {
+    await check("the panel's Branch section shows the review file and a button that opens it", async () => {
       let html = exports?.getSettingsPanelHtml() ?? "";
-      for (let text of [`<code>${reviewPath}</code>`, 'data-command="revealReviewFile"'])
+      for (let text of [`<code>${reviewPath}</code>`, 'data-command="openReviewFile"'])
         assert.ok(html.includes(text), `the panel lacks "${text}"`);
+      await exports?.handleSettingsPanelMessage({ command: "openReviewFile" });
+      assert.equal(vscode.window.activeTextEditor?.document.uri.fsPath.toLowerCase(), reviewPath.toLowerCase());
+      await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
     });
   }
   await check("the panel's VS Code Chat section shows the registered MCP server, the skill and the agent", () => {
