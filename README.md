@@ -11,9 +11,10 @@ chat agent) instead of people.
   branch with the included skill (`/branch-review-studio`) and posts its findings as comment
   threads through the extension's MCP server. It can also group related changes, and each group's
   diff then shows only that group's changes.
-- **Conversations:** reply in a thread, or use **Ask Agent** to send your message to a fork of
-  the session that wrote the review, to a fresh session, or to a new chat in VS Code's chat, so
-  the answer lands back in the thread.
+- **Conversations:** **Send to** _agent_ (e.g. **Send to Claude Code**) sends your comment or
+  reply to the default agent, by default a fork of the session that wrote the review; **Send to…**
+  lets you pick a fork, a fresh session, or a new chat in VS Code's chat. The answer lands back in
+  the thread. **Add Note to Self** just saves the comment.
 - **VS Code's chat:** no install needed. Pick the **Branch Reviewer** agent in the chat, or type
   `/branch-review-studio`; it uses the models you've enabled in VS Code (GitHub Copilot, your own
   API keys, other providers), not your Claude Code or ChatGPT subscription.

@@ -3,9 +3,10 @@ import * as vscode from "vscode";
 import { getErrorMessage } from "../core/files";
 import { findRepoRoot, getGitCommonDir, getGitDir } from "../core/git";
 import { IntegrationErrorLog } from "../core/integration-status";
+import { IntegrationId } from "../core/review";
 import { ReviewStore } from "../core/store";
 import { AgentServices } from "./agents";
-import { askAgent } from "./ask-agent";
+import { askAgent, trackSendTargets } from "./ask-agent";
 import {
   BaseContentProvider, baseScheme, getReviewFileOfUri, GroupViewContentProvider, groupViewScheme,
   HeadingContentProvider, headingScheme,
@@ -30,6 +31,10 @@ export interface BranchReviewStudioExports {
   getReviewViewHtml: () => string;
   /** Handles a message as if the Branch Review view's script had posted it */
   handleReviewViewMessage: (message: unknown) => Promise<void>;
+  /** Handles a message as if the open settings panel's script had posted it */
+  handleSettingsPanelMessage: (message: unknown) => Promise<void>;
+  /** Gets the `contextValue` of a thread's VS Code thread, which tells the menus its Send button */
+  getThreadContextValue: (threadId: string) => string | undefined;
   vscodeChat: VscodeChatIntegration;
 }
 
@@ -57,6 +62,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Branch
     let groupViews = new GroupViewContentProvider(model);
     let headings = new HeadingContentProvider(model);
     context.subscriptions.push(model, comments, navigator, groupViews, headings,
+      trackSendTargets(model, comments, log),
       vscode.workspace.registerTextDocumentContentProvider(baseScheme, new BaseContentProvider()),
       vscode.workspace.registerTextDocumentContentProvider(groupViewScheme, groupViews),
       vscode.workspace.registerTextDocumentContentProvider(headingScheme, headings));
@@ -64,7 +70,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Branch
     await model.refresh();
   }
   return { model, getSettingsPanelHtml: SettingsPanel.getHtmlIfOpen, getReviewViewHtml: () => view.getBody(),
-    handleReviewViewMessage: message => view.handleMessage(message), vscodeChat };
+    handleReviewViewMessage: message => view.handleMessage(message),
+    handleSettingsPanelMessage: SettingsPanel.handleMessageIfOpen,
+    getThreadContextValue: threadId => comments?.getThreadContextValue(threadId), vscodeChat };
 }
 
 export function deactivate(): void {}
@@ -111,20 +119,32 @@ function registerCommands(context: vscode.ExtensionContext, model: BranchReviewM
     switchBranch,
     changeBaseBranch,
     fetchBase,
-    createThread: (_, reply: vscode.CommentReply) => comments?.createThread(reply),
-    reply: (_, reply: vscode.CommentReply) => comments?.reply(reply),
+    addNote: (_, reply: vscode.CommentReply) => reply.text.trim() === ""
+      ? void vscode.window.showErrorMessage("Type a note first.") : comments?.saveMessage(reply),
     resolveThread: (_, thread: vscode.CommentThread) => comments?.setThreadStatus(thread, "resolved"),
     unresolveThread: (_, thread: vscode.CommentThread) => comments?.setThreadStatus(thread, "open"),
     deleteThread: (_, thread: vscode.CommentThread) => comments?.deleteThread(thread),
     deleteResolvedThreads,
     clearReview,
-    askAgent: (m, reply: vscode.CommentReply) => comments && askAgent(m, comments, reply, services),
+    // "Send to…" and "Send to Agent…" let the user pick; "Send to <agent>" sends as the
+    // askAgent settings say
+    askAgent: sendTo(),
+    sendToAgent: sendTo(),
+    sendToClaude: sendTo("claude"),
+    sendToCodex: sendTo("codex"),
+    sendToVscodeChat: sendTo("vscodeChat"),
   };
   for (let [name, handler] of Object.entries(commands)) {
     context.subscriptions.push(vscode.commands.registerCommand(`branchReviewStudio.${name}`, (...args: never[]) =>
       model === undefined
         ? vscode.window.showErrorMessage("Branch Review Studio: no workspace folder is in a git repo.")
         : handler(model, ...args)));
+  }
+
+  /** Gets the handler of a comment box's Send button, which runs askAgent with `agent`. */
+  function sendTo(agent?: IntegrationId) {
+    return (m: BranchReviewModel, reply: vscode.CommentReply) =>
+      comments && askAgent(m, comments, reply, services, agent);
   }
 }
 

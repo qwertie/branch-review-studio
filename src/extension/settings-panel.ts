@@ -5,32 +5,39 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { buildReviewPrompt, mcpServerName } from "../core/agent-commands";
 import { AgentIntegration, runAgentCommand } from "../core/agent-integration";
+import { AskAgentDefaults, askAgentSettingOptions, askAgentSettingsSection } from "../core/ask-agent-defaults";
 import { getErrorMessage } from "../core/files";
 import { getBaseBranchChoices, listBranches } from "../core/git";
 import { checkIntegrationStatus, IntegrationStatus, isIntegrationAvailable } from "../core/integration-status";
 import { escapeHtml } from "../core/markdown-subset";
 import { IntegrationId } from "../core/review";
 import { chatAgentName, vscodeChatDisplayName } from "../core/vscode-chat";
-import { agentIntegrations, AgentServices, codexExtensionId, findAgentCommand } from "./agents";
+import {
+  agentIntegrations, AgentServices, codexExtensionId, findAgentCommand, readAskAgentDefaults,
+} from "./agents";
 import { changeBaseBranchIfConfirmed } from "./change-base-branch";
 import { installForAgent, uninstallForAgent } from "./install";
 import { BranchReviewModel } from "./model";
 import { VscodeChatIntegration, VscodeChatStatus } from "./vscode-chat";
 
-/** A message that the panel's webview script posts when the user clicks a button. */
+/** A message that the panel's webview script posts when a button is clicked or a value picked. */
 interface PanelMessage {
-  command: "changeBaseBranch" | "copyReviewPrompt" | "recheck" | "install" | "uninstall";
+  command: "changeBaseBranch" | "copyReviewPrompt" | "recheck" | "install" | "uninstall" | "setAskAgentDefault";
   /** The agent of the integration whose button was clicked */
   agent?: string;
   /** The base branch selected in the panel */
   baseBranch?: string;
+  /** The askAgent setting whose dropdown changed (a key of AskAgentDefaults) */
+  setting?: string;
+  /** The option picked in that dropdown */
+  value?: string;
 }
 
 /**
  * The "Branch Review Studio" panel (a webview in the editor area, since VS Code has no rich modal
- * dialogs). It explains how to start a review, lets the user change the base branch, and shows
- * the status of each agent integration, which it checks when it opens and on Re-check, and of VS
- * Code's chat.
+ * dialogs). It explains how to start a review, lets the user set the askAgent settings and change
+ * the base branch, and shows the status of each agent integration, which it checks when it opens
+ * and on Re-check, and of VS Code's chat.
  */
 export class SettingsPanel {
   private static current: SettingsPanel | undefined;
@@ -42,7 +49,11 @@ export class SettingsPanel {
   private constructor(private readonly panel: vscode.WebviewPanel, private readonly model: BranchReviewModel
     | undefined, private readonly services: AgentServices, private readonly vscodeChat: VscodeChatIntegration) {
     let subscriptions = [panel.webview.onDidReceiveMessage((message: PanelMessage) => this.handleMessage(message)
-      .catch(e => void vscode.window.showErrorMessage(getErrorMessage(e))))];
+      .catch(e => void vscode.window.showErrorMessage(getErrorMessage(e)))),
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration(askAgentSettingsSection))
+        void this.render();
+    })];
     if (model) {
       subscriptions.push(model.onDidChange(() => {
         // Re-rendering resets the scroll position, so it happens only if the branch section changes
@@ -74,6 +85,11 @@ export class SettingsPanel {
     void SettingsPanel.current?.render();
   }
 
+  /** Handles a message as if the open panel's script had posted it, for scripts/smoke-test.ts. */
+  static async handleMessageIfOpen(message: unknown): Promise<void> {
+    await SettingsPanel.current?.handleMessage(message as PanelMessage);
+  }
+
   /** Gets the open panel's HTML, for scripts/smoke-test.ts; undefined if the panel isn't open. */
   static getHtmlIfOpen(): string | undefined {
     return SettingsPanel.current?.panel.webview.html;
@@ -103,6 +119,11 @@ export class SettingsPanel {
     } else if ((message.command === "install" || message.command === "uninstall") && integration) {
       await (message.command === "install" ? installForAgent : uninstallForAgent)(this.services, integration);
       await this.checkStatuses();
+    } else if (message.command === "setAskAgentDefault" && message.setting) {
+      // The message comes from the webview, so accept only a setting and value that the panel lists
+      let options = Object.entries(askAgentSettingOptions).find(([key]) => key === message.setting)?.[1];
+      if (options?.some(o => o.value === message.value))
+        await updateAskAgentSetting(this.getScope(), message.setting, message.value);
     }
   }
 
@@ -127,6 +148,7 @@ export class SettingsPanel {
 <body>
 <h1>Branch Review Studio</h1>
 ${renderHowTo(this.model)}
+${renderAskAgentDefaults(readAskAgentDefaults(this.getScope()))}
 <h2>Branch</h2>
 ${branchSection}
 <h2>Integrations <button class="secondary" data-command="recheck">Re-check</button></h2>
@@ -136,6 +158,11 @@ ${vscodeChatSection}
 </body>
 </html>`;
     }
+  }
+
+  /** Gets the folder whose settings the panel shows: the repo's, if there is one. */
+  private getScope(): vscode.Uri | undefined {
+    return this.model && vscode.Uri.file(this.model.repoRoot);
   }
 
   /** Gets the state that the branch section shows, as a string */
@@ -262,10 +289,44 @@ function renderHowTo(model: BranchReviewModel | undefined): string {
   that posts to Branch Review Studio (e.g. a <code>/branch-review</code> command), you can use that
   instead.</li>
 <li><b>Then:</b> the agent's findings appear as comment threads in the Branch Review view as it posts them, and
-  if it posts groups of related changes, the view lists the files under their groups. Answer with <b>Reply</b>, or
-  with <b>Ask Agent</b> to send your message to a fork of the reviewing session (with the same agent), to a fresh
-  session, or to a new chat in VS Code's chat.</li>
+  if it posts groups of related changes, the view lists the files under their groups. Answer in a thread with
+  <b>Send to</b> <i>agent</i>, which sends your message to the agent set under Ask Agent defaults below (by
+  default, a fork of the reviewing session, with the same agent), or with <b>Send to…</b> to pick a fork of the
+  reviewing session, a fresh session, or a new chat in VS Code's chat. <b>Add Note to Self</b> saves your message
+  without sending it.</li>
 </ol>`;
+}
+
+/** Renders the section with a dropdown per askAgent setting, showing its value in `defaults`. */
+function renderAskAgentDefaults(defaults: AskAgentDefaults): string {
+  return `<h2>Ask Agent defaults</h2>
+<p>The main button of a comment box, <b>Send to</b> <i>agent</i> (or Ctrl+Enter), saves your message and sends it,
+  with the thread's context, to the agent set here. <b>Send to…</b> next to it lets you choose each time. If that
+  agent isn't available, the main button is <b>Send to Agent…</b>, which lets you choose and says why. Changes are
+  saved in your user settings, or in the workspace's settings if the setting is set there
+  (<code>${askAgentSettingsSection}.*</code>).</p>
+${renderTable([["Agent", renderSelect("agent")], ["Session", renderSelect("session")],
+  ["Run in", `${renderSelect("runIn")} <span class="dim">(Claude Code and Codex; VS Code Chat always opens a new `
+    + "chat)</span>"]])}`;
+
+  function renderSelect(key: keyof AskAgentDefaults): string {
+    let options = askAgentSettingOptions[key].map(o =>
+      `<option value="${o.value}"${o.value === defaults[key] ? " selected" : ""}>${escapeHtml(o.label)}</option>`);
+    return `<select data-setting="${key}">${options.join("")}</select>`;
+  }
+}
+
+/**
+ * Writes an askAgent setting where its current value comes from: the workspace folder's or the
+ * workspace's settings if it is set there, else the user settings.
+ */
+async function updateAskAgentSetting(scope: vscode.Uri | undefined, key: string, value: unknown): Promise<void> {
+  let config = vscode.workspace.getConfiguration(askAgentSettingsSection, scope);
+  let inspected = config.inspect(key);
+  let target = inspected?.workspaceFolderValue !== undefined ? vscode.ConfigurationTarget.WorkspaceFolder
+    : inspected?.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace
+      : vscode.ConfigurationTarget.Global;
+  await config.update(key, value, target);
 }
 
 /** Lists the branches that the panel offers as base branches (see getBaseBranchChoices). */
@@ -294,8 +355,9 @@ function formatYesNo(value: boolean | undefined): string {
 }
 
 /**
- * The webview's script: posts a PanelMessage when a button with `data-command` is clicked, and
- * keeps the base branch that the user selected (but didn't apply yet) when the panel re-renders.
+ * The webview's script: posts a PanelMessage when a button with `data-command` is clicked or a
+ * dropdown with `data-setting` changes, and keeps the base branch that the user selected (but
+ * didn't apply yet) when the panel re-renders.
  */
 const script = `
 const vscode = acquireVsCodeApi();
@@ -304,6 +366,11 @@ const state = vscode.getState();
 if (select && state?.base === select.dataset.base && [...select.options].some(o => o.value === state.selected))
   select.value = state.selected;
 select?.addEventListener("change", () => vscode.setState({ base: select.dataset.base, selected: select.value }));
+document.addEventListener("change", event => {
+  const setting = event.target.closest("select[data-setting]");
+  if (setting)
+    vscode.postMessage({ command: "setAskAgentDefault", setting: setting.dataset.setting, value: setting.value });
+});
 document.addEventListener("click", event => {
   const button = event.target.closest("button[data-command]");
   if (button) {

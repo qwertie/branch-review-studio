@@ -90,11 +90,14 @@ export async function run(): Promise<void> {
         + `diffEditor.useInlineViewWhenSpaceIsLimited=${config.get("diffEditor.useInlineViewWhenSpaceIsLimited")}`);
       console.log(`INFO inspect renderSideBySide=${JSON.stringify(config.inspect("diffEditor.renderSideBySide"))}`);
     });
-    await check("createThread and reply save user comments; delete removes the thread", async () => {
+    await check("Add Note to Self saves a new thread without sending it; delete removes the thread", async () => {
       let before = snapshot.review!.threads.length;
       let uri = vscode.Uri.file(model.getFullPath(thread.file));
       let draft = { uri, range: new vscode.Range(2, 0, 2, 0), dispose: () => {} };
-      await vscode.commands.executeCommand("branchReviewStudio.createThread", { thread: draft, text: "smoke test" });
+      let { calls } = await interceptAgentCalls(async () => {
+        await vscode.commands.executeCommand("branchReviewStudio.addNote", { thread: draft, text: "smoke test" });
+      });
+      assert.deepEqual(calls, [], "Add Note to Self sent the message");
       let added = model.snapshot.review!.threads.at(-1)!;
       assert.equal(model.snapshot.review!.threads.length, before + 1);
       assert.equal(added.comments[0].body, "smoke test");
@@ -122,6 +125,7 @@ export async function run(): Promise<void> {
         assert.equal(model.snapshot.mergeBase?.mergeBaseSha, snapshot.mergeBase?.mergeBaseSha);
       });
     await checkDeletion(model, exports!, check);
+    await checkSendButtons(model, exports!, check);
     if (process.env.BRS_SMOKE_ASK_AGENT) {
       let previous = model.snapshot.review!;
       await check("Ask Agent (fork, background) puts Claude's answer in the thread", async () => {
@@ -170,6 +174,25 @@ export async function run(): Promise<void> {
       await vscode.commands.executeCommand("workbench.action.zoomReset");
     }
   });
+  await check("the panel's Ask Agent defaults section shows the settings; changing a dropdown writes its setting",
+    async () => {
+      let getConfig = () => vscode.workspace.getConfiguration("branchReviewStudio.askAgent",
+        model && vscode.Uri.file(model.repoRoot));
+      let html = exports?.getSettingsPanelHtml() ?? "";
+      for (let text of ["<h2>Ask Agent defaults</h2>", '<option value="sameAsReview" selected>',
+        '<option value="forkWhenPossible" selected>', '<option value="terminal" selected>'])
+        assert.ok(html.includes(text), `the panel lacks "${text}"`);
+      try {
+        for (let value of ["background", "bogus"])
+          await exports?.handleSettingsPanelMessage({ command: "setAskAgentDefault", setting: "runIn", value });
+        await delay(1000);
+        assert.equal(getConfig().inspect("runIn")?.globalValue, "background");
+        assert.ok(exports?.getSettingsPanelHtml()?.includes('<option value="background" selected>'),
+          "the panel doesn't show the new value");
+      } finally {
+        await getConfig().update("runIn", undefined, vscode.ConfigurationTarget.Global);
+      }
+    });
   await check("the panel's VS Code Chat section shows the registered MCP server, the skill and the agent", () => {
     let html = exports?.getSettingsPanelHtml() ?? "";
     if (process.env.BRS_SCREENSHOT_DIR)
@@ -341,6 +364,140 @@ async function checkDeletion(model: Model, exports: BranchReviewStudioExports,
 }
 
 /**
+ * Checks the buttons of comment boxes: the threads' `contextValue`s, which select the "Send to
+ * <agent>" button, follow the askAgent.agent setting; Ctrl+Enter in a new comment box clicks
+ * "Send to Claude Code", which saves the message and starts Claude Code in a terminal, forking the
+ * review session unless the askAgent.session setting is 'fresh'; "Send to VS Code Chat" starts a
+ * new chat. interceptAgentCalls replaces the terminal and the chat. With BRS_SCREENSHOT_DIR, saves
+ * a screenshot of the new comment box. Then restores the review and the settings.
+ */
+async function checkSendButtons(model: Model, exports: BranchReviewStudioExports,
+  check: (name: string, action: () => Promise<void>) => Promise<void>) {
+  let previous = model.snapshot.review!;
+  let reviewSession = findLatestSession(previous, "review");
+  let openThread = previous.threads.find(t => t.status === "open")!;
+  let getConfig = () => vscode.workspace.getConfiguration("branchReviewStudio.askAgent",
+    vscode.Uri.file(model.repoRoot));
+  let config = getConfig();
+  let setSetting = async (key: string, value: string | undefined) => {
+    await config.update(key, value, vscode.ConfigurationTarget.Global);
+    // trackSendTargets updates the threads asynchronously
+    await delay(1000);
+  };
+  // interceptAgentCalls doesn't replace background runs, and a QuickPick (shown if the agent isn't
+  // available) would block runOnNewThread, so each send first checks the button and runIn
+  let assertSendsTo = (target: string) => {
+    assert.equal(exports.getThreadContextValue(openThread.id), `brsOpen.${target}`, "unexpected Send button");
+    assert.equal(getConfig().get("runIn"), "terminal", "a background run would start the real agent");
+  };
+  try {
+    await check("the Send button of a thread follows the askAgent.agent setting", async () => {
+      let manifest = vscode.extensions.getExtension("qwertie.branch-review-studio")!.packageJSON;
+      let menu: { command: string, group: string }[] = manifest.contributes.menus["comments/commentThread/context"];
+      console.log(`INFO comment box actions: ${JSON.stringify(menu.map(m => [m.group, m.command]))}`);
+      assert.equal(reviewSession?.agent, "claude", "the test repo's review needs a Claude Code review session");
+      for (let [setting, target] of [["codex", "codex"], ["vscodeChat", "vscodeChat"], ["ask", "ask"],
+        [undefined, "claude"]]) {
+        await setSetting("agent", setting);
+        assert.equal(exports.getThreadContextValue(openThread.id), `brsOpen.${target}`, `agent=${setting}`);
+      }
+    });
+    await check("Ctrl+Enter in a new comment box clicks its primary button, Send to Claude Code", async () => {
+      assertSendsTo("claude");
+      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+      await vscode.commands.executeCommand("branchReviewStudio.openThread", openThread.id);
+      await delay(1500);
+      let editor = vscode.window.activeTextEditor!;
+      let line = editor.selection.active.line + 2;
+      editor.selection = new vscode.Selection(line, 0, line, 0);
+      await vscode.commands.executeCommand("workbench.action.addComment");
+      await delay(1500);
+      let text = "Smoke test: Ctrl+Enter";
+      await vscode.commands.executeCommand("type", { text });
+      if (editor.document.isDirty) {
+        await vscode.commands.executeCommand("workbench.action.files.revert");
+        assert.fail("the text went into the file instead of the comment box");
+      }
+      if (process.env.BRS_SCREENSHOT_DIR)
+        captureWindow(path.join(process.env.BRS_SCREENSHOT_DIR, "comment-box.png"));
+      let { calls } = await interceptAgentCalls(async callsSoFar => {
+        // Ctrl+Enter runs editor.action.submitComment, which doesn't wait for the button's command,
+        // so this waits for the agent call (or closes a QuickPick that the wrong button opened)
+        await vscode.commands.executeCommand("editor.action.submitComment");
+        for (let i = 0; i < 20 && callsSoFar.length === 0; i++)
+          await delay(500);
+        await vscode.commands.executeCommand("workbench.action.closeQuickOpen");
+      });
+      await model.refresh();
+      console.log(`INFO Ctrl+Enter calls: ${JSON.stringify(calls.map(c => c.name))}`);
+      assert.ok(model.snapshot.review!.threads.some(t => t.comments[0].body === text), "the message was not saved");
+      assert.deepEqual(calls.map(c => c.name), ["createTerminal"]);
+      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+    });
+    await check("Send to Claude Code saves the message and forks the review session in a terminal, or with the "
+      + "session setting 'fresh', starts a fresh session", async () => {
+      for (let session of ["forkWhenPossible", "fresh"]) {
+        await setSetting("session", session);
+        assertSendsTo("claude");
+        let text = `Smoke test: Send to Claude Code (${session})`;
+        let { result: added, calls } = await interceptAgentCalls(() => runOnNewThread(model, "sendToClaude", text));
+        let options = calls[0]?.args as vscode.TerminalOptions | undefined;
+        let args = (options?.shellArgs ?? []) as string[];
+        console.log(`INFO ${session}: terminal ${options?.name} in ${options?.cwd}: ${args.slice(0, 5).join(" ")}`);
+        assert.ok(added, "the message was not saved");
+        assert.deepEqual(calls.map(c => c.name), ["createTerminal"]);
+        assert.ok(options?.name?.startsWith("Claude: "), options?.name);
+        assert.equal(args.join(" ").includes(`--resume ${reviewSession!.sessionId} --fork-session`),
+          session === "forkWhenPossible", args.join(" "));
+        assert.ok(args.at(-1)?.includes(`review thread ${added.id}`), args.at(-1));
+      }
+    });
+    await check("Send to VS Code Chat saves the message and starts a new chat", async () => {
+      await setSetting("agent", "vscodeChat");
+      assertSendsTo("vscodeChat");
+      let text = "Smoke test: Send to VS Code Chat";
+      let { result: added, calls } = await interceptAgentCalls(() => runOnNewThread(model, "sendToVscodeChat", text));
+      assert.ok(added, "the message was not saved");
+      assert.deepEqual(calls.map(c => c.name), ["workbench.action.chat.newLocalChat", "workbench.action.chat.open"]);
+      assert.ok((calls[1].args as ChatOpenArgs<vscode.Uri>).query.includes(`review thread ${added.id}`));
+    });
+  } finally {
+    for (let key of ["agent", "session", "runIn"])
+      await config.update(key, undefined, vscode.ConfigurationTarget.Global);
+    await removeAddedThreadsAndSessions(model, previous);
+  }
+}
+
+/**
+ * Runs `action` while replacing what Ask Agent uses to start agents: the chat commands that open
+ * VS Code's chat do nothing, and terminals run a shell that exits at once instead of the agent.
+ * Returns the result of `action` and the calls, each with its name (the command, or
+ * "createTerminal") and arguments; `action` gets the array of calls, which grows as they happen.
+ */
+async function interceptAgentCalls<T>(action: (calls: { name: string, args: unknown }[]) => Promise<T>) {
+  let calls: { name: string, args: unknown }[] = [];
+  let { executeCommand } = vscode.commands;
+  let { createTerminal } = vscode.window;
+  let chatCommands = ["workbench.action.chat.newLocalChat", "workbench.action.chat.open"];
+  vscode.commands.executeCommand = (async (command: string, ...rest: unknown[]) => {
+    let isIntercepted = chatCommands.includes(command);
+    if (isIntercepted)
+      calls.push({ name: command, args: rest[0] });
+    return isIntercepted ? undefined : await executeCommand(command, ...rest);
+  }) as typeof executeCommand;
+  vscode.window.createTerminal = ((options: vscode.TerminalOptions) => {
+    calls.push({ name: "createTerminal", args: options });
+    return createTerminal({ name: options.name, shellPath: "cmd.exe", shellArgs: ["/c", "exit"] });
+  }) as typeof createTerminal;
+  try {
+    return { result: await action(calls), calls };
+  } finally {
+    vscode.commands.executeCommand = executeCommand;
+    vscode.window.createTerminal = createTerminal;
+  }
+}
+
+/**
  * Checks the VS Code Chat integration: the MCP server definition that the extension gives VS Code
  * (and, if VS Code can start the server in the throwaway profile, its tools), the contributed
  * skill and agent, and the chat commands that Ask Agent's VS Code Chat choice runs, which the check
@@ -374,27 +531,13 @@ async function checkVscodeChat(model: Model, exports: BranchReviewStudioExports,
   });
   await check("Ask Agent (VS Code Chat) starts a new local chat for the Branch Reviewer agent with the thread's lines",
     async () => {
-      let calls: { command: string, args: unknown }[] = [];
-      let { executeCommand } = vscode.commands;
-      let interceptedCommands = ["workbench.action.chat.newLocalChat", "workbench.action.chat.open"];
-      vscode.commands.executeCommand = (async (command: string, ...rest: unknown[]) => {
-        let isIntercepted = interceptedCommands.includes(command);
-        if (isIntercepted)
-          calls.push({ command, args: rest[0] });
-        return isIntercepted ? undefined : await executeCommand(command, ...rest);
-      }) as typeof executeCommand;
-      let added;
-      try {
-        added = await askAgentOnNewThread(model, getChoiceIndex(model, "vscodeChat", "fresh", "interactive"),
-          "Smoke test: what is this line about?");
-      } finally {
-        vscode.commands.executeCommand = executeCommand;
-      }
+      let { result: added, calls } = await interceptAgentCalls(() => askAgentOnNewThread(model,
+        getChoiceIndex(model, "vscodeChat", "fresh", "interactive"), "Smoke test: what is this line about?"));
       await model.modifyReview(review => {
         review.threads = review.threads.filter(t => t.id !== added.id);
       });
       console.log(`INFO chat commands: ${JSON.stringify(calls)}`);
-      assert.deepEqual(calls.map(c => c.command), interceptedCommands);
+      assert.deepEqual(calls.map(c => c.name), ["workbench.action.chat.newLocalChat", "workbench.action.chat.open"]);
       let args = calls[1].args as ChatOpenArgs<vscode.Uri>;
       assert.equal(args.mode, "Branch Reviewer");
       assert.equal(args.isPartialQuery, false);
@@ -658,21 +801,31 @@ async function captureScreenshots(model: NonNullable<BranchReviewStudioExports["
 }
 
 /**
- * Runs Ask Agent on a new thread at line 54 of the sample's SolverIssue.cs (or line 3 of the first
- * thread's file), picking the QuickPick item at `choiceIndex`; returns the saved thread.
+ * Runs Ask Agent ("Send to…") on a new thread (see runOnNewThread), picking the QuickPick item at
+ * `choiceIndex`; returns the saved thread.
  */
-async function askAgentOnNewThread(model: NonNullable<BranchReviewStudioExports["model"]>, choiceIndex: number,
-  text: string) {
+async function askAgentOnNewThread(model: Model, choiceIndex: number, text: string) {
+  return await runOnNewThread(model, "askAgent", text, async () => {
+    await delay(1500);
+    for (let i = 0; i < choiceIndex; i++)
+      await vscode.commands.executeCommand("workbench.action.quickOpenSelectNext");
+    await vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem");
+  });
+}
+
+/**
+ * Runs a comment box command (e.g. "sendToClaude") with the message `text` on a new thread at line
+ * 54 of the sample's SolverIssue.cs (or line 3 of the first thread's file), running `whileRunning`
+ * (e.g. to answer a QuickPick) while it runs; returns the saved thread.
+ */
+async function runOnNewThread(model: Model, command: string, text: string, whileRunning?: () => Promise<void>) {
   let threads = model.snapshot.review!.threads;
   let file = threads.find(t => t.file.endsWith("SolverIssue.cs"))?.file ?? threads[0].file;
   let line = file.endsWith("SolverIssue.cs") ? 53 : 2;
   let range = new vscode.Range(line, 0, line, 0);
   let draft = { uri: vscode.Uri.file(model.getFullPath(file)), range, dispose() {} };
-  let pending = vscode.commands.executeCommand("branchReviewStudio.askAgent", { thread: draft, text });
-  await delay(1500);
-  for (let i = 0; i < choiceIndex; i++)
-    await vscode.commands.executeCommand("workbench.action.quickOpenSelectNext");
-  await vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem");
+  let pending = vscode.commands.executeCommand(`branchReviewStudio.${command}`, { thread: draft, text });
+  await whileRunning?.();
   await pending;
   await model.refresh();
   return model.snapshot.review!.threads.findLast(t => t.comments[0].body === text)!;

@@ -2,7 +2,7 @@
   "name": "branch-review-studio",
   "displayName": "Branch Review Studio",
   "description": "Review a branch's working tree against its merge-base with develop, with comment threads exchanged with AI agents (Claude Code, Codex or VS Code's chat).",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "publisher": "qwertie",
   "private": true,
   "license": "Unlicense",
@@ -141,13 +141,8 @@
         "icon": "$(cloud-download)"
       },
       {
-        "command": "branchReviewStudio.createThread",
-        "title": "Add Comment",
-        "category": "Branch Review Studio"
-      },
-      {
-        "command": "branchReviewStudio.reply",
-        "title": "Reply",
+        "command": "branchReviewStudio.addNote",
+        "title": "Add Note to Self",
         "category": "Branch Review Studio"
       },
       {
@@ -180,8 +175,28 @@
         "category": "Branch Review Studio"
       },
       {
+        "command": "branchReviewStudio.sendToClaude",
+        "title": "Send to Claude Code",
+        "category": "Branch Review Studio"
+      },
+      {
+        "command": "branchReviewStudio.sendToCodex",
+        "title": "Send to Codex",
+        "category": "Branch Review Studio"
+      },
+      {
+        "command": "branchReviewStudio.sendToVscodeChat",
+        "title": "Send to VS Code Chat",
+        "category": "Branch Review Studio"
+      },
+      {
+        "command": "branchReviewStudio.sendToAgent",
+        "title": "Send to Agent…",
+        "category": "Branch Review Studio"
+      },
+      {
         "command": "branchReviewStudio.askAgent",
-        "title": "Ask Agent",
+        "title": "Send to…",
         "category": "Branch Review Studio",
         "icon": "$(sparkle)"
       },
@@ -254,35 +269,50 @@
       ],
       "comments/commentThread/context": [
         {
-          "command": "branchReviewStudio.createThread",
-          "when": "commentController == branch-review-studio && commentThreadIsEmpty",
+          "command": "branchReviewStudio.sendToClaude",
+          "when": "commentController == branch-review-studio && (commentThreadIsEmpty && branchReviewStudio.newThreadSendTarget == claude || commentThread =~ /\\.claude$/)",
           "group": "inline@1"
         },
         {
-          "command": "branchReviewStudio.reply",
-          "when": "commentController == branch-review-studio && !commentThreadIsEmpty",
+          "command": "branchReviewStudio.sendToCodex",
+          "when": "commentController == branch-review-studio && (commentThreadIsEmpty && branchReviewStudio.newThreadSendTarget == codex || commentThread =~ /\\.codex$/)",
+          "group": "inline@1"
+        },
+        {
+          "command": "branchReviewStudio.sendToVscodeChat",
+          "when": "commentController == branch-review-studio && (commentThreadIsEmpty && branchReviewStudio.newThreadSendTarget == vscodeChat || commentThread =~ /\\.vscodeChat$/)",
+          "group": "inline@1"
+        },
+        {
+          "command": "branchReviewStudio.sendToAgent",
+          "when": "commentController == branch-review-studio && (commentThreadIsEmpty && branchReviewStudio.newThreadSendTarget == ask || commentThread =~ /\\.ask$/)",
           "group": "inline@1"
         },
         {
           "command": "branchReviewStudio.askAgent",
-          "when": "commentController == branch-review-studio",
+          "when": "commentController == branch-review-studio && (commentThreadIsEmpty && branchReviewStudio.newThreadSendTarget != ask || commentThread =~ /\\.(claude|codex|vscodeChat)$/)",
           "group": "inline@2"
+        },
+        {
+          "command": "branchReviewStudio.addNote",
+          "when": "commentController == branch-review-studio",
+          "group": "inline@3"
         }
       ],
       "comments/commentThread/title": [
         {
           "command": "branchReviewStudio.resolveThread",
-          "when": "commentController == branch-review-studio && commentThread == brsOpen",
+          "when": "commentController == branch-review-studio && commentThread =~ /^brsOpen\\./",
           "group": "inline@1"
         },
         {
           "command": "branchReviewStudio.unresolveThread",
-          "when": "commentController == branch-review-studio && commentThread == brsResolved",
+          "when": "commentController == branch-review-studio && commentThread =~ /^brsResolved\\./",
           "group": "inline@1"
         },
         {
           "command": "branchReviewStudio.deleteThread",
-          "when": "commentController == branch-review-studio && commentThread =~ /^brs(Open|Resolved)$/",
+          "when": "commentController == branch-review-studio && commentThread =~ /^brs(Open|Resolved)\\./",
           "group": "inline@2"
         }
       ],
@@ -296,14 +326,6 @@
           "when": "false"
         },
         {
-          "command": "branchReviewStudio.createThread",
-          "when": "false"
-        },
-        {
-          "command": "branchReviewStudio.reply",
-          "when": "false"
-        },
-        {
           "command": "branchReviewStudio.resolveThread",
           "when": "false"
         },
@@ -313,6 +335,26 @@
         },
         {
           "command": "branchReviewStudio.deleteThread",
+          "when": "false"
+        },
+        {
+          "command": "branchReviewStudio.addNote",
+          "when": "false"
+        },
+        {
+          "command": "branchReviewStudio.sendToClaude",
+          "when": "false"
+        },
+        {
+          "command": "branchReviewStudio.sendToCodex",
+          "when": "false"
+        },
+        {
+          "command": "branchReviewStudio.sendToVscodeChat",
+          "when": "false"
+        },
+        {
+          "command": "branchReviewStudio.sendToAgent",
           "when": "false"
         },
         {
@@ -348,6 +390,69 @@
           "type": "string",
           "default": "",
           "description": "Path of the Codex CLI (codex.exe or codex). Empty means the CLI bundled with the OpenAI Codex VS Code extension (openai.chatgpt) if it is installed, else codex on PATH."
+        },
+        "branchReviewStudio.askAgent.agent": {
+          "type": "string",
+          "enum": [
+            "sameAsReview",
+            "claude",
+            "codex",
+            "vscodeChat",
+            "ask"
+          ],
+          "enumItemLabels": [
+            "Same agent as the review",
+            "Claude Code",
+            "Codex",
+            "VS Code Chat",
+            "Ask each time"
+          ],
+          "enumDescriptions": [
+            "The agent that ran the review session (the session that opened the thread, else the latest review session), so that it can fork that session. If the review has no session or its agent isn't available: Claude Code, else the first available agent.",
+            "The Claude Code CLI (claude).",
+            "The Codex CLI (codex).",
+            "A new chat in VS Code's chat, in agent mode.",
+            "No default: the main button is \"Send to Agent…\", which lists the choices."
+          ],
+          "default": "sameAsReview",
+          "scope": "resource",
+          "markdownDescription": "Who the main button of a comment box (**Send to** _agent_, which Ctrl+Enter also clicks) sends your message to, with the thread's context. **Send to…** next to it lets you choose each time, and **Add Note to Self** saves the message without sending it. If the agent isn't available, the main button is **Send to Agent…**, which lists the choices and says why."
+        },
+        "branchReviewStudio.askAgent.session": {
+          "type": "string",
+          "enum": [
+            "forkWhenPossible",
+            "fresh"
+          ],
+          "enumItemLabels": [
+            "Fork the review session when possible",
+            "Fresh session"
+          ],
+          "enumDescriptions": [
+            "Fork the session that wrote the review (it knows the review and reuses its prompt cache) if the chosen agent ran it and its folder still exists; else start a fresh session.",
+            "Always start a fresh session, whose prompt includes the review summary and merge-base."
+          ],
+          "default": "forkWhenPossible",
+          "scope": "resource",
+          "markdownDescription": "Whether **Send to** _agent_ forks the review session or starts a fresh session of Claude Code or Codex. VS Code's chat can't fork chats, so it always gets a new chat."
+        },
+        "branchReviewStudio.askAgent.runIn": {
+          "type": "string",
+          "enum": [
+            "terminal",
+            "background"
+          ],
+          "enumItemLabels": [
+            "Terminal",
+            "Background"
+          ],
+          "enumDescriptions": [
+            "An interactive terminal running the agent (claude or codex).",
+            "A background run (claude -p, codex exec) whose answer appears in the thread."
+          ],
+          "default": "terminal",
+          "scope": "resource",
+          "markdownDescription": "Where **Send to** _agent_ runs Claude Code or Codex. VS Code's chat always opens a new chat."
         }
       }
     }

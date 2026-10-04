@@ -46,13 +46,17 @@ VS Code's own chat agent) rather than humans.
   Claude Code's session id (`CLAUDE_CODE_SESSION_ID`), Codex's thread id (which Codex sends with
   every tool call) or VS Code's chat id (`vscode.conversationId`, which VS Code sends with every
   tool call).
-- **Ask Agent** (next to **Reply** in a thread) saves your message and sends it, with the thread's
-  context, to an agent: by default as a fork of the session that wrote the review, with the agent
-  that ran it (`claude --resume <id> --fork-session` or `codex fork <id>`, which reuses its prompt
-  cache), or as a fresh session of either agent; in a terminal or in the background. It can also
-  send the message to a new chat in VS Code's chat (see "VS Code Chat" below).
+- A comment box (of a new thread or of a reply) has three buttons. **Send to** _agent_ (e.g.
+  **Send to Claude Code**; the highlighted button, which Ctrl+Enter clicks) saves your message and
+  sends it, with the thread's context, to the default agent: unless you change the **Ask Agent
+  defaults**, the agent that ran the review, as a fork of the session that wrote the review
+  (`claude --resume <id> --fork-session` or `codex fork <id>`, which reuses its prompt cache), in a
+  terminal. **Send to…** (Ask Agent) lets you pick: a fork of the review session or a fresh session
+  of either agent, in a terminal or in the background, or a new chat in VS Code's chat (see "VS Code
+  Chat" below). **Add Note to Self** saves the message without sending it.
 - The **Settings and Integrations** button (gear) in the view's header opens the Branch Review
-  Studio panel: how to start a review, the base branch, and the status of each integration.
+  Studio panel: how to start a review, the Ask Agent defaults, the base branch, and the status of
+  each integration.
 
 ## Install (per user)
 
@@ -101,7 +105,7 @@ The Branch Review Studio panel (gear button) shows these steps too.
    If the repo has its own review command that posts to Branch Review Studio (e.g. a
    `/branch-review` command), you can use that instead.
 3. The agent's findings appear as comment threads in the Branch Review view as it posts them.
-   Answer with **Reply**, or with **Ask Agent** (see Usage, step 5).
+   Answer with **Send to** _agent_ or **Send to…** (see Usage, step 5).
 
 The skill (`skills/branch-review-studio/SKILL.md`, based on an in-house `/branch-review` command)
 fetches the base branch, checks whether the branch is behind it, runs the repo's tests (found in
@@ -134,13 +138,32 @@ branches or stashes.
 4. Ask an agent for a review (see "How to run a review connected to the extension" above). The
    threads appear when the agent saves them.
 5. To comment, hover over a line of a changed file (either side of the diff) and click `+`.
-   Type a message, then click **Reply** / **Add Comment** to just save it, or **Ask Agent** to also
-   send it to an agent. Ask Agent lists, default first (Enter picks it), grouped by agent if both
-   CLIs are installed: fork the review session in a terminal, fork it in the background (only
-   with the agent that ran the review session, since neither agent can fork the other's
-   sessions), then a fresh session in a terminal or in the background, for each agent, and last,
-   **VS Code Chat (agent mode)**, a new chat in VS Code's chat (see "VS Code Chat" below). A fresh
-   session gets the review summary and merge-base in its prompt.
+   Type a message, then click one of the comment box's buttons (a reply in a thread has the same
+   buttons):
+   - **Send to** _agent_, the highlighted button (Ctrl+Enter clicks it), saves the message and
+     sends it as the **Ask Agent defaults** say: the settings `branchReviewStudio.askAgent.agent`
+     (**Same agent as the review**, the default: the agent that ran the session that opened the
+     thread, else the latest review session; if there is none or its agent isn't available,
+     Claude Code, else the first available one; or **Claude Code**, **Codex**, **VS Code Chat**, or
+     **Ask each time**), `branchReviewStudio.askAgent.session` (**Fork the review session when
+     possible**, the default: if that agent ran it and its folder still exists; or **Fresh
+     session**) and `branchReviewStudio.askAgent.runIn` (**Terminal**, the default, or
+     **Background**; VS Code Chat always gets a new chat). The button names the agent, e.g. **Send to
+     Claude Code**, and so differs between threads whose review sessions ran in different agents.
+     With **Ask each time**, or if the agent isn't available (e.g. its CLI wasn't found), the button
+     is **Send to Agent…**, which works like **Send to…** and says why the agent isn't available.
+     The Branch Review Studio panel (gear) has dropdowns for these settings, which you can also set
+     per workspace in VS Code's settings.
+   - **Send to…** (Ask Agent) saves the message and lists the ways to send it, default first (Enter
+     picks it), grouped by agent if both CLIs are installed: fork the review session in a terminal,
+     fork it in the background (only with the agent that ran the review session, since neither
+     agent can fork the other's sessions), then a fresh session in a terminal or in the background,
+     for each agent, and last, **VS Code Chat (agent mode)**, a new chat in VS Code's chat (see "VS
+     Code Chat" below).
+   - **Add Note to Self** saves the message without sending it.
+
+   How the agents run, with either Send button (a fresh session gets the review summary and
+   merge-base in its prompt):
    - A terminal runs the agent interactively (`claude` or `codex`) in the review session's folder.
    - A background run (`claude -p`, or `codex exec --json`) shows a status bar item, logs to the
      "Branch Review Studio" output channel, and if the agent doesn't answer with `review_reply`,
@@ -175,7 +198,9 @@ Settings: `branchReviewStudio.baseBranch` (default `develop`),
 worktree), `branchReviewStudio.openWorktreeInNewWindow` (default false),
 `branchReviewStudio.claudePath` (default: `claude.exe`/`claude` on PATH, then `~/.local/bin`),
 `branchReviewStudio.codexPath` (default: the Codex CLI bundled with the Codex VS Code extension
-`openai.chatgpt` if installed, since it is usually newer than the one on PATH, else `codex` on PATH).
+`openai.chatgpt` if installed, since it is usually newer than the one on PATH, else `codex` on PATH),
+`branchReviewStudio.askAgent.agent`, `branchReviewStudio.askAgent.session` and
+`branchReviewStudio.askAgent.runIn` (what **Send to** _agent_ does; see Usage, step 5).
 
 ## VS Code Chat
 
@@ -205,9 +230,10 @@ installed:
 - **Reviews:** start them in the chat as above. The MCP server records the chat as the review
   session (VS Code sends the chat's id as `vscode.conversationId` with every tool call), and the
   agent's comments are by "VS Code Chat".
-- **Ask Agent:** the **VS Code Chat (agent mode)** choice saves your message, starts a new chat with
-  VS Code's own agent (`workbench.action.chat.newLocalChat`), and sends it, with the Branch Reviewer
-  agent and the model selected in the chat, a prompt that names the thread, its file and lines and
+- **Ask Agent:** **Send to VS Code Chat**, or the **VS Code Chat (agent mode)** choice of **Send
+  to…**, saves your message, starts a new chat with VS Code's own agent
+  (`workbench.action.chat.newLocalChat`), and sends it, with the Branch Reviewer agent and the
+  model selected in the chat, a prompt that names the thread, its file and lines and
   its messages and asks for an answer with `review_reply`; the thread's lines are attached (for a
   thread on the base side, the prompt quotes them instead). The answer appears in the thread when
   the agent calls `review_reply`; extensions can't read chat replies, so there is no fallback. VS
@@ -278,6 +304,9 @@ Settings and Integrations**) opens a panel in the editor area. (VS Code has no r
 dialogs, so it is a webview tab.) It shows:
 
 - How to run a review connected to the extension, with a **Copy Review Prompt** button.
+- **Ask Agent defaults:** a dropdown for each `branchReviewStudio.askAgent.*` setting (see Usage,
+  step 5), which shows the setting's current value. Changing a dropdown writes the setting to your
+  user settings, or to the workspace's (or workspace folder's) settings if it is set there.
 - The branch, its base branch (with a selector and **Change Base Branch**, which works like the
   command of that name) and the merge-base.
 - One section per CLI integration (Claude Code, Codex): the CLI's path and version, whether you are
@@ -326,7 +355,12 @@ The extension and MCP server do not modify any tracked files in your repos. They
   (Windows only) and the HTML of the panel and the Branch Review view. It
   checks the VS Code Chat integration without a chat request: VS Code starts the MCP server and
   lists its tools, registers the skill and agent, and Ask Agent's VS Code Chat choice runs the chat
-  commands (which the check intercepts) with the expected arguments. With `BRS_SMOKE_ASK_AGENT=1`
+  commands (which the check intercepts) with the expected arguments. It also checks the comment
+  box's buttons: which **Send to** _agent_ button each thread shows for several settings, that
+  **Send to Claude Code** (also by Ctrl+Enter) and **Send to VS Code Chat** save the message and
+  start the agent (in a terminal that the check replaces, or in the intercepted chat), that **Add
+  Note to Self** sends nothing, and that the panel's Ask Agent defaults dropdowns write the
+  settings. With `BRS_SMOKE_ASK_AGENT=1`
   it also runs Ask Agent twice (fork in the background and in a terminal), which spends tokens.
   With `BRS_SMOKE_CODEX=1` it runs Ask Agent with Codex twice (a fresh background session that
   calls `review_begin`, then a background fork of it), which also spends tokens, and then removes

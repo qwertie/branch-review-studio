@@ -410,3 +410,21 @@ Review) and P4 (smoke tests clean up after themselves). Assumptions: Clear Revie
 branch and merge-base; deletions recheck the stored review inside the lock, so changes an agent
 makes while a confirmation is open aren't deleted unseen; the row button is mouse-only, like the
 file rows' buttons.
+
+## S12. Follow-up: Send to <agent> as the primary comment action
+
+### User
+
+> I'm confused about how this is supposed to work. I click "+" and then I write a comment and the
+> highlighted button is "Add comment". But it doesn't send the comment to an agent? I don't see the
+> point of Being able to write a message that is not sent to an agent. Such a thing would be a
+> "note to self", wouldn't it? And a note to self should not be the primary button. And the
+> configuration screen offers no way to select which Integration will be used when you click "Ask
+> agent"
+
+Answer: "As described except use 'Add note to self'". VS Code findings: the highlighted comment
+action is the first after sorting by group and order; Ctrl+Enter runs the first action of the last
+group, so all actions share one group. Assumptions: with "Same agent as the review", an
+unavailable agent falls back to Claude Code, then to the first available agent; the panel writes a
+setting at the level where it's already set (workspace folder, workspace), else user settings;
+empty notes are rejected.

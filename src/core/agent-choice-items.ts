@@ -53,6 +53,6 @@ export function getAgentChoiceItems(availableAgents: AgentKind[],
 }
 
 /** Gets the name of an integration shown in the UI, e.g. "Claude Code" or "VS Code Chat". */
-function getIntegrationDisplayName(integration: IntegrationId): string {
+export function getIntegrationDisplayName(integration: IntegrationId): string {
   return integration === "vscodeChat" ? vscodeChatDisplayName : getAgentIntegration(integration).displayName;
 }

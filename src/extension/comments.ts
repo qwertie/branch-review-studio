@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { AnchorLocation, createAnchor } from "../core/anchoring";
+import { newThreadSendTargetKey, SendTarget } from "../core/ask-agent-defaults";
 import { getErrorMessage } from "../core/files";
 import { addComment, addThread, DiffSide, getAuthorLabel, getThread, ReviewThread, ThreadStatus } from "../core/review";
 import { baseScheme, getBaseUri, parseBaseUri } from "./base-content";
@@ -22,6 +23,8 @@ export class ReviewCommentController implements vscode.Disposable {
   /** Review thread ids by VS Code thread (only for threads that are saved in the review) */
   private readonly threadIds = new WeakMap<vscode.CommentThread, string>();
   private readonly subscriptions: vscode.Disposable[] = [];
+  /** Gets the SendTarget of a thread (undefined = a new thread); see setSendTargetFinder */
+  private findSendTarget: (threadId: string | undefined) => SendTarget = () => "ask";
 
   constructor(private readonly model: BranchReviewModel) {
     this.controller.options = { prompt: "Add a review comment", placeHolder: "Markdown is supported" };
@@ -41,7 +44,7 @@ export class ReviewCommentController implements vscode.Disposable {
   }
 
   /** Saves a new VS Code thread's first comment as a new review thread; returns its id. */
-  async createThread(reply: vscode.CommentReply): Promise<string | undefined> {
+  private async createThread(reply: vscode.CommentReply): Promise<string | undefined> {
     let target = this.getCommentTarget(reply.thread.uri);
     if (target) {
       let lines = await this.model.getFileLines(target.file, target.side) ?? [];
@@ -57,6 +60,26 @@ export class ReviewCommentController implements vscode.Disposable {
     return undefined;
   }
 
+  /**
+   * Sets the function that gets each thread's SendTarget, and applies it: a thread's `contextValue`
+   * ends with its SendTarget, and the context key newThreadSendTargetKey holds that of new threads,
+   * so that package.json's comment menu shows the matching "Send to <agent>" button.
+   */
+  setSendTargetFinder(findSendTarget: (threadId: string | undefined) => SendTarget): void {
+    this.findSendTarget = findSendTarget;
+    void vscode.commands.executeCommand("setContext", newThreadSendTargetKey, findSendTarget(undefined));
+    for (let thread of this.model.snapshot.review?.threads ?? []) {
+      let vscodeThread = this.vscodeThreads.get(thread.id);
+      if (vscodeThread)
+        vscodeThread.contextValue = this.getContextValue(thread);
+    }
+  }
+
+  /** Gets the `contextValue` of a VS Code thread, for scripts/smoke-test.ts. */
+  getThreadContextValue(threadId: string): string | undefined {
+    return this.vscodeThreads.get(threadId)?.contextValue;
+  }
+
   /** Expands a review thread's widget in the editors that show it, e.g. before revealing it. */
   expandThread(threadId: string): void {
     let vscodeThread = this.vscodeThreads.get(threadId);
@@ -70,7 +93,7 @@ export class ReviewCommentController implements vscode.Disposable {
   }
 
   /** Saves a reply in an existing thread; returns the thread's id. */
-  async reply(reply: vscode.CommentReply): Promise<string | undefined> {
+  private async reply(reply: vscode.CommentReply): Promise<string | undefined> {
     let threadId = this.threadIds.get(reply.thread);
     if (threadId !== undefined) {
       let author = { kind: "user" as const, name: await this.model.getUserName() };
@@ -146,7 +169,7 @@ export class ReviewCommentController implements vscode.Disposable {
       .filter(s => s !== "").join(" · ");
     vscodeThread.state = thread.status === "resolved"
       ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
-    vscodeThread.contextValue = thread.status === "resolved" ? "brsResolved" : "brsOpen";
+    vscodeThread.contextValue = this.getContextValue(thread);
     vscodeThread.comments = thread.comments.map(comment => ({
       body: new vscode.MarkdownString(comment.body),
       mode: vscode.CommentMode.Preview,
@@ -154,6 +177,14 @@ export class ReviewCommentController implements vscode.Disposable {
       timestamp: new Date(comment.createdAt),
       contextValue: comment.author.kind,
     }));
+  }
+
+  /**
+   * Gets the `contextValue` of a thread, which package.json's menus test: its status and its
+   * SendTarget, e.g. "brsOpen.claude".
+   */
+  private getContextValue(thread: ReviewThread): string {
+    return `${thread.status === "resolved" ? "brsResolved" : "brsOpen"}.${this.findSendTarget(thread.id)}`;
   }
 
   /** Disposes the VS Code thread of a review thread, if it has one. */

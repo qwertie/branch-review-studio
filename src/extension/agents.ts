@@ -2,9 +2,12 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { mcpServerName } from "../core/agent-commands";
 import { AgentCommand, AgentIntegration, getSearchOptionsForProcess } from "../core/agent-integration";
+import { AskAgentDefaults, askAgentSettingsSection, parseAskAgentDefaults } from "../core/ask-agent-defaults";
 import { claudeIntegration } from "../core/claude-cli";
 import { codexIntegration, findCodexExtensionExecutables } from "../core/codex-cli";
 import { IntegrationErrorLog } from "../core/integration-status";
+import { AgentKind, IntegrationId } from "../core/review";
+import { chatOpenCommand } from "../core/vscode-chat";
 
 /** The agent integrations, in the order in which the UI lists them. */
 export const agentIntegrations: AgentIntegration[] = [claudeIntegration, codexIntegration];
@@ -32,6 +35,30 @@ export function findAgentCommand(integration: AgentIntegration): AgentCommand | 
   let preferredPaths = codexExtension ? findCodexExtensionExecutables(codexExtension.extensionPath, process.platform)
     : [];
   return integration.findExecutable(getSearchOptionsForProcess(configuredPath, preferredPaths));
+}
+
+/** The integrations that Ask Agent can use now (see findAvailableIntegrations). */
+export interface AvailableIntegrations {
+  /** The agent CLIs that were found */
+  commands: Map<AgentKind, AgentCommand>;
+  /** The agents in `commands`, plus 'vscodeChat' if VS Code has the chat commands Ask Agent runs */
+  available: IntegrationId[];
+}
+
+/** Finds the agent CLIs (see findAgentCommand) and checks whether VS Code's chat is available. */
+export async function findAvailableIntegrations(): Promise<AvailableIntegrations> {
+  let commands = new Map(agentIntegrations.flatMap(i => {
+    let command = findAgentCommand(i);
+    return command ? [[i.agent, command] as const] : [];
+  }));
+  let hasVscodeChat = (await vscode.commands.getCommands(true)).includes(chatOpenCommand);
+  return { commands, available: [...commands.keys(), ...hasVscodeChat ? ["vscodeChat" as const] : []] };
+}
+
+/** Reads the askAgent settings that apply to the folder `scope` (see AskAgentDefaults). */
+export function readAskAgentDefaults(scope: vscode.Uri | undefined): AskAgentDefaults {
+  let config = vscode.workspace.getConfiguration(askAgentSettingsSection, scope);
+  return parseAskAgentDefaults(key => config.get(key));
 }
 
 /** Gets the path of the MCP server script bundled with this extension. */
