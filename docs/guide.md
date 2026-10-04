@@ -250,6 +250,11 @@ installed:
 A review can divide the branch's changes into groups of related changes, e.g. "Fix CSV quoting" and
 "Rename `Widget` to `Gadget`", so that you can review one topic at a time.
 
+- **Grouping:** the skill (and `review_begin`'s instructions) tells the agent to take the groups
+  from the branch's commit messages: each change that a message describes is a group, named after
+  the message's subject, with the message's text about it, verbatim, as its summary. The agent then
+  assigns each change in the diff to a group; only changes that no message describes (e.g.
+  uncommitted work) get new groups, whose summaries start with "Missing from commit message."
 - **Posting:** the agent calls `review_set_groups` with the groups (`id`, `name`, markdown
   `summary`) and, for each changed file, its groups. For a file in more than one group, it gives
   each group's `ranges`: the working-tree lines (1-based, inclusive) of that group's changes; for

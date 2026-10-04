@@ -79,7 +79,8 @@ async function main(): Promise<void> {
       groups: z.array(z.object({
         id: z.string().describe("Short id, unique among the groups, e.g. 'parser'"),
         name: z.string().describe("Heading shown in the Branch Review view, e.g. 'Fix CSV parser quoting'"),
-        summary: z.string().describe("Markdown: what the group's changes do"),
+        summary: z.string().describe("Markdown: the commit-message text that describes the group's changes, "
+          + "verbatim, or \"Missing from commit message.\" and what they do"),
       })),
       files: z.array(z.object({
         file: z.string().describe("Repo-relative (or absolute) path of a changed file"),

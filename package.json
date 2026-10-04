@@ -2,7 +2,7 @@
   "name": "branch-review-studio",
   "displayName": "Branch Review Studio",
   "description": "Review a branch's working tree against its merge-base with develop, with comment threads exchanged with AI agents (Claude Code, Codex or VS Code's chat).",
-  "version": "0.10.0",
+  "version": "1.0.0",
   "publisher": "qwertie",
   "private": true,
   "license": "Unlicense",

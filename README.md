@@ -9,8 +9,8 @@ chat agent) instead of people.
   file, so you can edit as you review.
 - **Agent reviews:** an agent (Claude Code, Codex, or VS Code's chat in agent mode) reviews the
   branch with the included skill (`/branch-review-studio`) and posts its findings as comment
-  threads through the extension's MCP server. It can also group related changes, and each group's
-  diff then shows only that group's changes.
+  threads through the extension's MCP server. It also groups the changes by the branch's commit
+  messages, and each group's diff then shows only that group's changes.
 - **Conversations:** **Send to** _agent_ (e.g. **Send to Claude Code**) sends your comment or
   reply to the default agent, by default a fork of the session that wrote the review; **Send to…**
   lets you pick a fork, a fresh session, or a new chat in VS Code's chat. The answer lands back in
