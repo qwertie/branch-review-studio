@@ -22,7 +22,8 @@ import { VscodeChatIntegration, VscodeChatStatus } from "./vscode-chat";
 
 /** A message that the panel's webview script posts when a button is clicked or a value picked. */
 interface PanelMessage {
-  command: "changeBaseBranch" | "copyReviewPrompt" | "recheck" | "install" | "uninstall" | "setAskAgentDefault";
+  command: "changeBaseBranch" | "copyReviewPrompt" | "recheck" | "install" | "uninstall" | "setAskAgentDefault"
+    | "revealReviewFile";
   /** The agent of the integration whose button was clicked */
   agent?: string;
   /** The base branch selected in the panel */
@@ -114,6 +115,8 @@ export class SettingsPanel {
       await vscode.env.clipboard.writeText(buildReviewPrompt(model.snapshot.branch, model.baseBranch));
       void vscode.window.showInformationMessage("Copied the review prompt. Paste it into Claude Code, Codex or VS "
         + "Code's chat.");
+    } else if (message.command === "revealReviewFile" && model) {
+      await revealReviewFile(model);
     } else if (message.command === "recheck") {
       await this.checkStatuses();
     } else if ((message.command === "install" || message.command === "uninstall") && integration) {
@@ -168,22 +171,27 @@ ${vscodeChatSection}
   /** Gets the state that the branch section shows, as a string */
   private getBranchState(): string {
     let snapshot = this.model?.snapshot;
-    return JSON.stringify([snapshot?.branch, this.model?.baseBranch, snapshot?.mergeBase, snapshot?.mergeBaseError]);
+    return JSON.stringify([snapshot?.branch, this.model?.baseBranch, snapshot?.mergeBase, snapshot?.mergeBaseError,
+      snapshot?.review === undefined]);
   }
 
   private async renderBranchSection(model: BranchReviewModel): Promise<string> {
-    let { branch, mergeBase, mergeBaseError } = model.snapshot;
+    let { branch, mergeBase, mergeBaseError, review } = model.snapshot;
     let baseBranch = model.baseBranch;
     let options = (await getBaseBranchOptions(model))
       .map(name => `<option${name === baseBranch ? " selected" : ""}>${escapeHtml(name)}</option>`);
     let mergeBaseText = mergeBase ? `<code>${mergeBase.mergeBaseSha.slice(0, 10)}</code> (merge-base of HEAD and `
       + `${escapeHtml(mergeBase.baseRef)})` : `<span class="error">${escapeHtml(mergeBaseError ?? "unknown")}</span>`;
+    let reviewFileText = branch === undefined ? "none (detached HEAD)"
+      : `<code>${escapeHtml(model.store.getReviewPath(branch))}</code>${review ? "" : " (not created yet)"}`;
     return `<table>
 <tr><th>Folder</th><td><code>${escapeHtml(model.repoRoot)}</code></td></tr>
 <tr><th>Branch</th><td><code>${escapeHtml(branch ?? "(detached HEAD)")}</code></td></tr>
 <tr><th>Base branch</th><td><select id="baseBranch" data-base="${escapeHtml(baseBranch)}">${options.join("")}</select>
   <button data-command="changeBaseBranch">Change Base Branch</button></td></tr>
 <tr><th>Merge-base</th><td>${mergeBaseText}</td></tr>
+<tr><th>Review file</th><td>${reviewFileText}
+  <button class="secondary" data-command="revealReviewFile">${revealInOSLabel}</button></td></tr>
 </table>`;
   }
 
@@ -334,6 +342,23 @@ async function getBaseBranchOptions(model: BranchReviewModel): Promise<string[]>
   return getBaseBranchChoices(await listBranches(model.repoRoot).catch(() => []), model.baseBranch,
     model.snapshot.branch);
 }
+
+/**
+ * Shows the current branch's review file in the OS file manager (Explorer, Finder, ...) or, if it
+ * doesn't exist yet, the innermost review-store folder that exists.
+ */
+async function revealReviewFile(model: BranchReviewModel): Promise<void> {
+  let { store, snapshot: { branch } } = model;
+  let target = [branch && store.getReviewPath(branch), store.reviewsDir, store.dir].find(f => f && fs.existsSync(f));
+  if (target)
+    await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(target));
+  else
+    void vscode.window.showInformationMessage(`There is no review yet; reviews will be stored in ${store.dir}.`);
+}
+
+/** Label of VS Code's revealFileInOS command on this platform, for renderBranchSection */
+const revealInOSLabel = process.platform === "win32" ? "Show in File Explorer"
+  : process.platform === "darwin" ? "Reveal in Finder" : "Open Containing Folder";
 
 /** Renders a two-column table of rows' names and values (HTML). */
 function renderTable(rows: string[][]): string {

@@ -313,7 +313,9 @@ dialogs, so it is a webview tab.) It shows:
   step 5), which shows the setting's current value. Changing a dropdown writes the setting to your
   user settings, or to the workspace's (or workspace folder's) settings if it is set there.
 - The branch, its base branch (with a selector and **Change Base Branch**, which works like the
-  command of that name) and the merge-base.
+  command of that name), the merge-base, and the path of the branch's review file, with
+  **Show in File Explorer** (**Reveal in Finder** on macOS), which shows the file, or the review
+  store's folder if the branch has no review yet.
 - One section per CLI integration (Claude Code, Codex): the CLI's path and version, whether you are
   signed in (`claude auth status`, `codex login status`), whether the MCP server is registered
   (`claude mcp get`, `codex mcp get`), whether the skill is installed, for Codex whether the Codex

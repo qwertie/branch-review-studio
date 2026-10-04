@@ -193,6 +193,14 @@ export async function run(): Promise<void> {
         await getConfig().update("runIn", undefined, vscode.ConfigurationTarget.Global);
       }
     });
+  if (model?.snapshot.branch) {
+    let reviewPath = model.store.getReviewPath(model.snapshot.branch);
+    await check("the panel's Branch section shows the review file and a button that reveals it", () => {
+      let html = exports?.getSettingsPanelHtml() ?? "";
+      for (let text of [`<code>${reviewPath}</code>`, 'data-command="revealReviewFile"'])
+        assert.ok(html.includes(text), `the panel lacks "${text}"`);
+    });
+  }
   await check("the panel's VS Code Chat section shows the registered MCP server, the skill and the agent", () => {
     let html = exports?.getSettingsPanelHtml() ?? "";
     if (process.env.BRS_SCREENSHOT_DIR)
