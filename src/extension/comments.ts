@@ -10,6 +10,19 @@ import { BranchReviewModel, ReviewSnapshot } from "./model";
 /** Id of the CommentController, which package.json menus test (`commentController == ...`). */
 const controllerId = "branch-review-studio";
 
+/** Name of the setting that says which documents get the "+" (new thread) button */
+export const commentButtonSetting = "branchReviewStudio.commentButton";
+/**
+ * The values of the commentButton setting, default first, with the labels (which match
+ * package.json's enumItemLabels) and tooltips of the settings panel's radio buttons.
+ */
+export const commentButtonOptions = [
+  { value: "allFiles", label: "Show on all files", tooltip: "Any file in the repo, changed or not" },
+  { value: "openDiffs", label: "Show only on files whose diff is open", tooltip: "Also shows the button in a "
+    + "normal editor of a file while the file's diff is open, since both editors show the same document" },
+] as const;
+export type CommentButtonMode = typeof commentButtonOptions[number]["value"];
+
 /**
  * Shows the review's threads with the VS Code Comments API and saves the user's comments. A
  * thread on the modified side is attached to the real file URI, so it appears both in normal
@@ -25,14 +38,33 @@ export class ReviewCommentController implements vscode.Disposable {
   private readonly subscriptions: vscode.Disposable[] = [];
   /** Gets the SendTarget of a thread (undefined = a new thread); see setSendTargetFinder */
   private findSendTarget: (threadId: string | undefined) => SendTarget = () => "ask";
+  /**
+   * Offers the "+" (new thread) button on every line of the documents that isCommentable accepts.
+   * Public for scripts/smoke-test.ts, which records the ranges it returns.
+   */
+  readonly commentingRangeProvider: vscode.CommentingRangeProvider = {
+    provideCommentingRanges: document => this.isCommentable(document) && document.lineCount > 0
+      ? [new vscode.Range(0, 0, document.lineCount - 1, 0)] : [],
+  };
+  /**
+   * What isCommentable's answers depended on when commentingRangeProvider was last assigned (the
+   * commentButton setting, and the open diffs or the changed files), as JSON
+   */
+  private commentableDocumentsKey: string | undefined;
 
   constructor(private readonly model: BranchReviewModel) {
     this.controller.options = { prompt: "Add a review comment", placeHolder: "Markdown is supported" };
-    this.controller.commentingRangeProvider = {
-      provideCommentingRanges: document => this.isCommentable(document) && document.lineCount > 0
-        ? [new vscode.Range(0, 0, document.lineCount - 1, 0)] : [],
-    };
-    this.subscriptions.push(model.onDidChange(snapshot => this.showThreads(snapshot)));
+    this.updateCommentingRangesIfNeeded();
+    this.subscriptions.push(
+      model.onDidChange(snapshot => {
+        this.showThreads(snapshot);
+        this.updateCommentingRangesIfNeeded();
+      }),
+      vscode.window.tabGroups.onDidChangeTabs(() => this.updateCommentingRangesIfNeeded()),
+      vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration(commentButtonSetting))
+          this.updateCommentingRangesIfNeeded();
+      }));
   }
 
   /**
@@ -200,6 +232,26 @@ export class ReviewCommentController implements vscode.Disposable {
     return snapshot.mergeBase && getBaseUri(this.model.repoRoot, snapshot.mergeBase.mergeBaseSha, thread.file);
   }
 
+  /**
+   * Assigns commentingRangeProvider to the controller if the set of documents that isCommentable
+   * accepts may differ from the last time, because VS Code asks for the commenting ranges of open
+   * editors again only when the provider is assigned.
+   */
+  private updateCommentingRangesIfNeeded(): void {
+    let mode = this.readCommentButtonMode();
+    let key = JSON.stringify([mode, mode === "openDiffs" ? [...getOpenDiffUris()].sort()
+      : this.model.snapshot.changedFiles.map(f => [f.path, f.oldPath])]);
+    if (key !== this.commentableDocumentsKey) {
+      this.commentableDocumentsKey = key;
+      this.controller.commentingRangeProvider = this.commentingRangeProvider;
+    }
+  }
+
+  /** Reads the commentButton setting of the repo's folder. */
+  private readCommentButtonMode(): CommentButtonMode {
+    return readCommentButtonMode(vscode.Uri.file(this.model.repoRoot));
+  }
+
   /** Gets the review file and side of a document, or undefined if it is not in this review. */
   private getCommentTarget(uri: vscode.Uri): { file: string, side: DiffSide } | undefined {
     if (uri.scheme === "file") {
@@ -213,11 +265,17 @@ export class ReviewCommentController implements vscode.Disposable {
     return undefined;
   }
 
-  /** Allows new threads in the changed files of the current branch, on either side of the diff. */
+  /**
+   * Allows new threads, as the commentButton setting says, in documents of this review: with
+   * "openDiffs", in either side of an open diff; else in the repo's files, except `.git` and the
+   * files in it (such as the review file), and in the base side of a changed file.
+   */
   private isCommentable(document: vscode.TextDocument): boolean {
     let target = this.getCommentTarget(document.uri);
-    return target !== undefined && this.model.snapshot.changedFiles.some(f => f.path === target.file
-      || (target.side === "base" && f.oldPath === target.file));
+    return target !== undefined && (this.readCommentButtonMode() === "openDiffs"
+      ? getOpenDiffUris().has(document.uri.toString())
+      : target.side === "modified" ? target.file.split("/")[0] !== ".git"
+        : this.model.snapshot.changedFiles.some(f => f.path === target.file || f.oldPath === target.file));
   }
 
   /**
@@ -234,5 +292,34 @@ export class ReviewCommentController implements vscode.Disposable {
       void vscode.window.showErrorMessage(`Branch Review Studio could not save the comment: ${getErrorMessage(e)}`);
       return false;
     }
+  }
+}
+
+/**
+ * Reads the commentButton setting (see commentButtonOptions) for a folder, e.g. the repo's; an
+ * invalid value counts as the default.
+ */
+export function readCommentButtonMode(scope: vscode.Uri | undefined): CommentButtonMode {
+  let value = vscode.workspace.getConfiguration(undefined, scope).get(commentButtonSetting);
+  return commentButtonOptions.find(o => o.value === value)?.value ?? commentButtonOptions[0].value;
+}
+
+/**
+ * Gets the URIs (as strings) of the documents on either side of the diffs in the open tabs,
+ * including the diffs in multi-diff editors such as Open All Changes.
+ */
+function getOpenDiffUris(): Set<string> {
+  let diffs = vscode.window.tabGroups.all.flatMap(group => group.tabs).flatMap(tab => getTextDiffs(tab.input));
+  return new Set(diffs.flatMap(diff => [diff.original.toString(), diff.modified.toString()]));
+
+  /**
+   * Gets the diffs of a tab. A multi-diff tab's input is a TabInputTextMultiDiff, which VS Code's
+   * stable API doesn't declare, so it is recognized by its `textDiffs`.
+   */
+  function getTextDiffs(input: unknown): vscode.TabInputTextDiff[] {
+    if (input instanceof vscode.TabInputTextDiff)
+      return [input];
+    let textDiffs = typeof input === "object" && input !== null && "textDiffs" in input ? input.textDiffs : [];
+    return Array.isArray(textDiffs) ? textDiffs.filter(d => d instanceof vscode.TabInputTextDiff) : [];
   }
 }

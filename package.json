@@ -391,6 +391,24 @@
           "default": "",
           "description": "Path of the Codex CLI (codex.exe or codex). Empty means the CLI bundled with the OpenAI Codex VS Code extension (openai.chatgpt) if it is installed, else codex on PATH."
         },
+        "branchReviewStudio.commentButton": {
+          "type": "string",
+          "enum": [
+            "allFiles",
+            "openDiffs"
+          ],
+          "enumItemLabels": [
+            "Show on all files",
+            "Show only on files whose diff is open"
+          ],
+          "enumDescriptions": [
+            "Every file in the repo, changed or not, in normal editors and in diffs, and the base (left) side of a changed file's diff.",
+            "Only the two sides of the diffs in open tabs (including Open All Changes). While a file's diff is open, a normal editor of the file shows the button too, because both editors show the same document."
+          ],
+          "default": "allFiles",
+          "scope": "resource",
+          "markdownDescription": "Where the `+` button that starts a new review thread appears when you hover over a line. Threads on unchanged files appear in the Branch Review view under their file."
+        },
         "branchReviewStudio.askAgent.agent": {
           "type": "string",
           "enum": [

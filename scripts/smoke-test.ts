@@ -18,6 +18,7 @@ import {
 import { listChangesEntries, listThreadVisits, ThreadVisit } from "../src/core/review-outline";
 import { ReviewStore } from "../src/core/store";
 import { ChatOpenArgs } from "../src/core/vscode-chat";
+import { getBaseUri } from "../src/extension/base-content";
 import type { BranchReviewStudioExports } from "../src/extension/extension";
 import { ReviewTools } from "../src/mcp/review-tools";
 
@@ -126,6 +127,7 @@ export async function run(): Promise<void> {
       });
     await checkDeletion(model, exports!, check);
     await checkSendButtons(model, exports!, check);
+    await checkCommentingRanges(model, exports!, check);
     if (process.env.BRS_SMOKE_ASK_AGENT) {
       let previous = model.snapshot.review!;
       await check("Ask Agent (fork, background) puts Claude's answer in the thread", async () => {
@@ -193,6 +195,22 @@ export async function run(): Promise<void> {
         await getConfig().update("runIn", undefined, vscode.ConfigurationTarget.Global);
       }
     });
+  await check("the panel's Comment threads section shows the commentButton setting; picking a radio button writes "
+    + "it", async () => {
+    let getConfig = () => vscode.workspace.getConfiguration("branchReviewStudio",
+      model && vscode.Uri.file(model.repoRoot));
+    assert.ok(exports?.getSettingsPanelHtml()?.includes('value="allFiles" checked'), "the panel lacks the setting");
+    try {
+      for (let value of ["openDiffs", "bogus"])
+        await exports?.handleSettingsPanelMessage({ command: "setCommentButton", value });
+      await delay(1000);
+      assert.equal(getConfig().inspect("commentButton")?.globalValue, "openDiffs");
+      assert.ok(exports?.getSettingsPanelHtml()?.includes('value="openDiffs" checked'),
+        "the panel doesn't show the new value");
+    } finally {
+      await getConfig().update("commentButton", undefined, vscode.ConfigurationTarget.Global);
+    }
+  });
   if (model?.snapshot.branch) {
     let reviewPath = model.store.getReviewPath(model.snapshot.branch);
     await check("the panel's Branch section shows the review file and a button that opens it", async () => {
@@ -476,6 +494,112 @@ async function checkSendButtons(model: Model, exports: BranchReviewStudioExports
     for (let key of ["agent", "session", "runIn"])
       await config.update(key, undefined, vscode.ConfigurationTarget.Global);
     await removeAddedThreadsAndSessions(model, previous);
+  }
+}
+
+/**
+ * Checks where VS Code shows the "+" (new thread) button by recording how many commenting ranges
+ * the provider returns for each document: with the commentButton setting "allFiles" (the default)
+ * in an unchanged file, where a new comment works too; with "openDiffs" in a changed file before,
+ * during and after its diff is open; and in the base side of a file that becomes changed and
+ * unchanged again, which this check does by appending a line to the file and then restoring it.
+ */
+async function checkCommentingRanges(model: Model, exports: BranchReviewStudioExports,
+  check: (name: string, action: () => Promise<void>) => Promise<void>) {
+  let changedPaths = new Set(model.snapshot.changedFiles.map(f => f.path));
+  let unchangedFile = execFileSync("git", ["ls-files", "*.md"], { cwd: model.repoRoot, encoding: "utf8" })
+    .split("\n").find(f => f !== "" && !changedPaths.has(f));
+  let changedFile = model.snapshot.changedFiles.find(f => f.status === "Modified")?.path;
+  let provider = exports.commentingRangeProvider!;
+  let { provideCommentingRanges } = provider;
+  /** Number of ranges that each query returned, oldest first, by document URI */
+  let rangeCounts = new Map<string, (number | undefined)[]>();
+  provider.provideCommentingRanges = (document, token) => {
+    let ranges = provideCommentingRanges.call(provider, document, token);
+    let key = document.uri.toString();
+    rangeCounts.set(key, [...rangeCounts.get(key) ?? [], Array.isArray(ranges) ? ranges.length : undefined]);
+    return ranges;
+  };
+  try {
+    await check("commentButton allFiles: an unchanged file gets the + button; a new thread there is saved, "
+      + "anchored and shown", async () => {
+      assert.ok(unchangedFile, "the test repo needs an unchanged .md file");
+      let uri = vscode.Uri.file(model.getFullPath(unchangedFile));
+      await openOnly(uri);
+      await waitForRangeCount(uri, 1);
+      let previous = model.snapshot.review!;
+      try {
+        let draft = { uri, range: new vscode.Range(2, 0, 2, 0), dispose: () => {} };
+        await vscode.commands.executeCommand("branchReviewStudio.addNote",
+          { thread: draft, text: "Smoke test: unchanged file" });
+        let added = model.snapshot.review!.threads.at(-1)!;
+        assert.deepEqual([added.file, added.side, added.anchor.startLine], [unchangedFile, "modified", 3]);
+        assert.equal(model.snapshot.threadLocations.get(added.id)?.isOutdated, false, "the thread is outdated");
+        assert.ok(exports.getThreadContextValue(added.id), "the editor doesn't show the thread");
+        assert.ok(listThreadVisits(model.snapshot.outline).some(v => v.thread.thread.id === added.id),
+          "the Branch Review view doesn't list the thread");
+      } finally {
+        await removeAddedThreadsAndSessions(model, previous);
+      }
+    });
+    await check("commentButton openDiffs: a changed file opened normally gets the + button only while its diff "
+      + "is open", async () => {
+      assert.ok(changedFile, "the test repo needs a modified file");
+      let uri = vscode.Uri.file(model.getFullPath(changedFile));
+      let config = vscode.workspace.getConfiguration("branchReviewStudio");
+      try {
+        await config.update("commentButton", "openDiffs", vscode.ConfigurationTarget.Global);
+        await openOnly(uri);
+        await waitForRangeCount(uri, 0);
+        await vscode.commands.executeCommand("branchReviewStudio.openFileDiff", changedFile);
+        await waitForRangeCount(uri, 1);
+        await waitForRangeCount(getBaseUri(model.repoRoot, model.snapshot.mergeBase!.mergeBaseSha, changedFile), 1);
+        let diffTab = vscode.window.tabGroups.all.flatMap(g => g.tabs)
+          .find(t => t.input instanceof vscode.TabInputTextDiff);
+        await vscode.window.tabGroups.close(diffTab!);
+        await waitForRangeCount(uri, 0);
+      } finally {
+        await config.update("commentButton", undefined, vscode.ConfigurationTarget.Global);
+      }
+    });
+    await check("Bug_2026_10_StaleCommentingRanges: the base side of a file gets the + button when the file "
+      + "becomes changed and loses it when the file is unchanged again", async () => {
+      assert.ok(unchangedFile, "the test repo needs an unchanged .md file");
+      let fullPath = model.getFullPath(unchangedFile);
+      let original = fs.readFileSync(fullPath);
+      let baseUri = getBaseUri(model.repoRoot, model.snapshot.mergeBase!.mergeBaseSha, unchangedFile);
+      try {
+        await openOnly(baseUri);
+        await waitForRangeCount(baseUri, 0);
+        fs.writeFileSync(fullPath, Buffer.concat([original, Buffer.from("\nSmoke test line\n")]));
+        await model.refresh();
+        assert.ok(model.snapshot.changedFiles.some(f => f.path === unchangedFile), "the file is not changed");
+        await waitForRangeCount(baseUri, 1);
+        fs.writeFileSync(fullPath, original);
+        await model.refresh();
+        await waitForRangeCount(baseUri, 0);
+      } finally {
+        fs.writeFileSync(fullPath, original);
+        await model.refresh();
+      }
+    });
+  } finally {
+    provider.provideCommentingRanges = provideCommentingRanges;
+    await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+  }
+
+  /** Closes all editors, forgets the recorded ranges and opens `uri` in a normal editor. */
+  async function openOnly(uri: vscode.Uri) {
+    await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+    rangeCounts.clear();
+    await vscode.window.showTextDocument(uri);
+  }
+  /** Waits up to 5 seconds until the last query for `uri` returned `expected` ranges. */
+  async function waitForRangeCount(uri: vscode.Uri, expected: number) {
+    let getCounts = () => rangeCounts.get(uri.toString()) ?? [];
+    for (let i = 0; i < 20 && getCounts().at(-1) !== expected; i++)
+      await delay(250);
+    assert.equal(getCounts().at(-1), expected, `range counts of ${uri}: ${JSON.stringify(getCounts())}`);
   }
 }
 

@@ -16,6 +16,7 @@ import {
   agentIntegrations, AgentServices, codexExtensionId, findAgentCommand, readAskAgentDefaults,
 } from "./agents";
 import { changeBaseBranchIfConfirmed } from "./change-base-branch";
+import { CommentButtonMode, commentButtonOptions, commentButtonSetting, readCommentButtonMode } from "./comments";
 import { installForAgent, uninstallForAgent } from "./install";
 import { BranchReviewModel } from "./model";
 import { VscodeChatIntegration, VscodeChatStatus } from "./vscode-chat";
@@ -23,22 +24,22 @@ import { VscodeChatIntegration, VscodeChatStatus } from "./vscode-chat";
 /** A message that the panel's webview script posts when a button is clicked or a value picked. */
 interface PanelMessage {
   command: "changeBaseBranch" | "copyReviewPrompt" | "recheck" | "install" | "uninstall" | "setAskAgentDefault"
-    | "openReviewFile";
+    | "setCommentButton" | "openReviewFile";
   /** The agent of the integration whose button was clicked */
   agent?: string;
   /** The base branch selected in the panel */
   baseBranch?: string;
   /** The askAgent setting whose dropdown changed (a key of AskAgentDefaults) */
   setting?: string;
-  /** The option picked in that dropdown */
+  /** The option picked in that dropdown, or the commentButton setting's value that was picked */
   value?: string;
 }
 
 /**
  * The "Branch Review Studio" panel (a webview in the editor area, since VS Code has no rich modal
- * dialogs). It explains how to start a review, lets the user set the askAgent settings and change
- * the base branch, and shows the status of each agent integration, which it checks when it opens
- * and on Re-check, and of VS Code's chat.
+ * dialogs). It explains how to start a review, lets the user set the askAgent and commentButton
+ * settings and change the base branch, and shows the status of each agent integration, which it
+ * checks when it opens and on Re-check, and of VS Code's chat.
  */
 export class SettingsPanel {
   private static current: SettingsPanel | undefined;
@@ -52,7 +53,7 @@ export class SettingsPanel {
     let subscriptions = [panel.webview.onDidReceiveMessage((message: PanelMessage) => this.handleMessage(message)
       .catch(e => void vscode.window.showErrorMessage(getErrorMessage(e)))),
     vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration(askAgentSettingsSection))
+      if (e.affectsConfiguration(askAgentSettingsSection) || e.affectsConfiguration(commentButtonSetting))
         void this.render();
     })];
     if (model) {
@@ -126,7 +127,9 @@ export class SettingsPanel {
       // The message comes from the webview, so accept only a setting and value that the panel lists
       let options = Object.entries(askAgentSettingOptions).find(([key]) => key === message.setting)?.[1];
       if (options?.some(o => o.value === message.value))
-        await updateAskAgentSetting(this.getScope(), message.setting, message.value);
+        await updateSetting(this.getScope(), `${askAgentSettingsSection}.${message.setting}`, message.value);
+    } else if (message.command === "setCommentButton" && commentButtonOptions.some(o => o.value === message.value)) {
+      await updateSetting(this.getScope(), commentButtonSetting, message.value);
     }
   }
 
@@ -152,6 +155,7 @@ export class SettingsPanel {
 <h1>Branch Review Studio</h1>
 ${renderHowTo(this.model)}
 ${renderAskAgentDefaults(readAskAgentDefaults(this.getScope()))}
+${renderCommentButton(readCommentButtonMode(this.getScope()))}
 <h2>Branch</h2>
 ${branchSection}
 <h2>Integrations <button class="secondary" data-command="recheck">Re-check</button></h2>
@@ -320,21 +324,30 @@ ${renderTable([["Agent", renderSelect("agent")], ["Session", renderSelect("sessi
   function renderSelect(key: keyof AskAgentDefaults): string {
     let options = askAgentSettingOptions[key].map(o =>
       `<option value="${o.value}"${o.value === defaults[key] ? " selected" : ""}>${escapeHtml(o.label)}</option>`);
-    return `<select data-setting="${key}">${options.join("")}</select>`;
+    return `<select data-command="setAskAgentDefault" data-setting="${key}">${options.join("")}</select>`;
   }
 }
 
+/** Renders the section with a radio button per value of the commentButton setting. */
+function renderCommentButton(mode: CommentButtonMode): string {
+  let radios = commentButtonOptions.map(o => `<label title="${escapeHtml(o.tooltip)}"><input type="radio" `
+    + `name="commentButton" data-command="setCommentButton" value="${o.value}"${o.value === mode ? " checked" : ""}>`
+    + ` ${escapeHtml(o.label)}</label>`);
+  return `<h2>Comment threads</h2>
+${renderTable([["Comment <code>+</code> button", radios.join("<br>")]])}`;
+}
+
 /**
- * Writes an askAgent setting where its current value comes from: the workspace folder's or the
- * workspace's settings if it is set there, else the user settings.
+ * Writes a setting where its current value comes from: the workspace folder's or the workspace's
+ * settings if it is set there, else the user settings.
  */
-async function updateAskAgentSetting(scope: vscode.Uri | undefined, key: string, value: unknown): Promise<void> {
-  let config = vscode.workspace.getConfiguration(askAgentSettingsSection, scope);
-  let inspected = config.inspect(key);
+async function updateSetting(scope: vscode.Uri | undefined, name: string, value: unknown): Promise<void> {
+  let config = vscode.workspace.getConfiguration(undefined, scope);
+  let inspected = config.inspect(name);
   let target = inspected?.workspaceFolderValue !== undefined ? vscode.ConfigurationTarget.WorkspaceFolder
     : inspected?.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace
       : vscode.ConfigurationTarget.Global;
-  await config.update(key, value, target);
+  await config.update(name, value, target);
 }
 
 /** Lists the branches that the panel offers as base branches (see getBaseBranchChoices). */
@@ -366,8 +379,8 @@ function formatYesNo(value: boolean | undefined): string {
 
 /**
  * The webview's script: posts a PanelMessage when a button with `data-command` is clicked or a
- * dropdown with `data-setting` changes, and keeps the base branch that the user selected (but
- * didn't apply yet) when the panel re-renders.
+ * dropdown or radio button with `data-command` changes, and keeps the base branch that the user
+ * selected (but didn't apply yet) when the panel re-renders.
  */
 const script = `
 const vscode = acquireVsCodeApi();
@@ -377,9 +390,9 @@ if (select && state?.base === select.dataset.base && [...select.options].some(o 
   select.value = state.selected;
 select?.addEventListener("change", () => vscode.setState({ base: select.dataset.base, selected: select.value }));
 document.addEventListener("change", event => {
-  const setting = event.target.closest("select[data-setting]");
-  if (setting)
-    vscode.postMessage({ command: "setAskAgentDefault", setting: setting.dataset.setting, value: setting.value });
+  const input = event.target.closest("select[data-command], input[data-command]");
+  if (input)
+    vscode.postMessage({ command: input.dataset.command, setting: input.dataset.setting, value: input.value });
 });
 document.addEventListener("click", event => {
   const button = event.target.closest("button[data-command]");

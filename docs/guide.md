@@ -28,7 +28,7 @@ VS Code's own chat agent) rather than humans.
   end with a message in the status bar.
 - Review comments appear as comment threads (VS Code Comments API) in the diff editor, in normal
   editors, and in the Comments panel. You can reply, resolve, reopen, delete, and start new threads
-  on changed files.
+  in any file of the repo (or, with a setting, only in open diffs; see Usage, step 5).
 - To delete a thread, click the trash button in its title bar, or the trash button that its row in
   the Branch Review view shows when you hover over it. **Delete Resolved Threads** (a button in the
   view's header, and in the view's `...` menu) deletes all resolved threads. **Clear Review** (view
@@ -137,9 +137,14 @@ summarizes the changes and findings in chat. Options: `--no-minor`, `--all`, `--
    `...` menu), which runs `git fetch origin <baseBranch>`.
 4. Ask an agent for a review (see "How to run a review connected to the extension" above). The
    threads appear when the agent saves them.
-5. To comment, hover over a line of a changed file (either side of the diff) and click `+`.
-   Type a message, then click one of the comment box's buttons (a reply in a thread has the same
-   buttons):
+5. To comment, hover over a line and click `+`. By default the `+` appears in every file of the
+   repo, changed or not, in normal editors and in diffs, and on the base (left) side of a changed
+   file's diff; threads on unchanged files appear in the Branch Review view under their file. With
+   the setting `branchReviewStudio.commentButton` set to **Show only on files whose diff is open**
+   (`openDiffs`), the `+` appears only on the two sides of open diffs (including Open All Changes);
+   while a file's diff is open, a normal editor of that file shows it too, because VS Code asks for
+   comment ranges per document, and both editors show the same document. Type a message, then
+   click one of the comment box's buttons (a reply in a thread has the same buttons):
    - **Send to** _agent_, the highlighted button (Ctrl+Enter clicks it), saves the message and
      sends it as the **Ask Agent defaults** say: the settings `branchReviewStudio.askAgent.agent`
      (**Same agent as the review**, the default: the agent that ran the session that opened the
@@ -200,7 +205,9 @@ worktree), `branchReviewStudio.openWorktreeInNewWindow` (default false),
 `branchReviewStudio.codexPath` (default: the Codex CLI bundled with the Codex VS Code extension
 `openai.chatgpt` if installed, since it is usually newer than the one on PATH, else `codex` on PATH),
 `branchReviewStudio.askAgent.agent`, `branchReviewStudio.askAgent.session` and
-`branchReviewStudio.askAgent.runIn` (what **Send to** _agent_ does; see Usage, step 5).
+`branchReviewStudio.askAgent.runIn` (what **Send to** _agent_ does; see Usage, step 5),
+`branchReviewStudio.commentButton` (where the `+` for new threads appears: `allFiles`, the
+default, or `openDiffs`; see Usage, step 5).
 
 ## VS Code Chat
 
@@ -312,6 +319,10 @@ dialogs, so it is a webview tab.) It shows:
 - **Ask Agent defaults:** a dropdown for each `branchReviewStudio.askAgent.*` setting (see Usage,
   step 5), which shows the setting's current value. Changing a dropdown writes the setting to your
   user settings, or to the workspace's (or workspace folder's) settings if it is set there.
+- **Comment threads:** radio buttons for `branchReviewStudio.commentButton`, labeled **Show on all
+  files** and **Show only on files whose diff is open** (whose tooltip explains that a normal
+  editor of the file shows the `+` too while its diff is open). Picking one writes the setting like
+  the Ask Agent dropdowns do.
 - The branch, its base branch (with a selector and **Change Base Branch**, which works like the
   command of that name), the merge-base, and the path of the branch's review file, with
   **Open Review File**, which opens the file (JSON) in an editor, once the branch has a review.
@@ -366,7 +377,9 @@ The extension and MCP server do not modify any tracked files in your repos. They
   **Send to Claude Code** (also by Ctrl+Enter) and **Send to VS Code Chat** save the message and
   start the agent (in a terminal that the check replaces, or in the intercepted chat), that **Add
   Note to Self** sends nothing, and that the panel's Ask Agent defaults dropdowns write the
-  settings. With `BRS_SMOKE_ASK_AGENT=1`
+  settings. It checks where the `+` appears with each `branchReviewStudio.commentButton` value, and
+  that the base side of a file gets it when the file becomes changed (it appends a line to an
+  unchanged file and restores it). With `BRS_SMOKE_ASK_AGENT=1`
   it also runs Ask Agent twice (fork in the background and in a terminal), which spends tokens.
   With `BRS_SMOKE_CODEX=1` it runs Ask Agent with Codex twice (a fresh background session that
   calls `review_begin`, then a background fork of it), which also spends tokens, and then removes
