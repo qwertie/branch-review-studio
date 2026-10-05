@@ -3,6 +3,6 @@
   <circle cx="6" cy="19" r="2"/>
   <circle cx="16" cy="5" r="2"/>
   <path d="M6 7v10"/>
-  <path d="M16 7c0 4-7 3-10 10"/>
+  <path d="M16 7c0 4-10 2-10 5"/>
   <path d="M14 15h8v5h-4l-2 2v-2h-2z"/>
 </svg>
