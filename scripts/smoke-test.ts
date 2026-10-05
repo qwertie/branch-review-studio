@@ -416,7 +416,7 @@ async function checkSendButtons(model: Model, exports: BranchReviewStudioExports
   // interceptAgentCalls doesn't replace background runs, and a QuickPick (shown if the agent isn't
   // available) would block runOnNewThread, so each send first checks the button and runIn
   let assertSendsTo = (target: string) => {
-    assert.equal(exports.getThreadContextValue(openThread.id), `brsOpen.${target}`, "unexpected Send button");
+    assert.equal(exports.getVscodeThread(openThread.id)?.contextValue, `brsOpen.${target}`, "unexpected Send button");
     assert.equal(getConfig().get("runIn"), "terminal", "a background run would start the real agent");
   };
   try {
@@ -428,7 +428,7 @@ async function checkSendButtons(model: Model, exports: BranchReviewStudioExports
       for (let [setting, target] of [["codex", "codex"], ["vscodeChat", "vscodeChat"], ["ask", "ask"],
         [undefined, "claude"]]) {
         await setSetting("agent", setting);
-        assert.equal(exports.getThreadContextValue(openThread.id), `brsOpen.${target}`, `agent=${setting}`);
+        assert.equal(exports.getVscodeThread(openThread.id)?.contextValue, `brsOpen.${target}`, `agent=${setting}`);
       }
     });
     await check("Ctrl+Enter in a new comment box clicks its primary button, Send to Claude Code", async () => {
@@ -535,7 +535,7 @@ async function checkCommentingRanges(model: Model, exports: BranchReviewStudioEx
         let added = model.snapshot.review!.threads.at(-1)!;
         assert.deepEqual([added.file, added.side, added.anchor.startLine], [unchangedFile, "modified", 3]);
         assert.equal(model.snapshot.threadLocations.get(added.id)?.isOutdated, false, "the thread is outdated");
-        assert.ok(exports.getThreadContextValue(added.id), "the editor doesn't show the thread");
+        assert.ok(exports.getVscodeThread(added.id), "the editor doesn't show the thread");
         assert.ok(listThreadVisits(model.snapshot.outline).some(v => v.thread.thread.id === added.id),
           "the Branch Review view doesn't list the thread");
       } finally {
@@ -836,6 +836,18 @@ async function checkReviewUi(model: Model, exports: BranchReviewStudioExports,
       assert.ok(editor.visibleRanges.some(r => r.start.line + 1 <= 63 && r.end.line + 1 >= 64), `visible ${ranges}`);
       screenshot("reveal-long-thread.png");
     });
+    await check("Bug_2026_10_CommentScrollbarLost: a refresh keeps a thread's VS Code comments, and a reply keeps "
+      + "the existing ones, since VS Code gives each new comment object a new widget, which lacks a scrollbar",
+      async () => {
+        let getComments = () => exports.getVscodeThread(longThreadId)!.comments;
+        let shown = getComments();
+        await model.refresh();
+        assert.equal(getComments(), shown, "the refresh replaced the comments");
+        await model.modifyReview(review => addComment(review, getThread(review, longThreadId), claude, "A reply."));
+        let comments = getComments();
+        assert.ok(comments.length === shown.length + 1 && shown.every((c, i) => c === comments[i]),
+          "the reply replaced the existing comments");
+      });
     await check("Go to Thread… lists the threads in order and reveals the picked one", async () => {
       let index = visits.findIndex(v => v.thread.thread.id === longThreadId);
       let pending = vscode.commands.executeCommand("branchReviewStudio.openThread");

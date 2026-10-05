@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { AnchorLocation, createAnchor } from "../core/anchoring";
 import { newThreadSendTargetKey, SendTarget } from "../core/ask-agent-defaults";
 import { getErrorMessage } from "../core/files";
+import { assignChangedProperties } from "../core/objects";
 import { addComment, addThread, DiffSide, getAuthorLabel, getThread, ReviewThread, ThreadStatus } from "../core/review";
 import { baseScheme, getBaseUri, parseBaseUri } from "./base-content";
 import { deleteThreadIfConfirmed } from "./delete-commands";
@@ -35,6 +36,8 @@ export class ReviewCommentController implements vscode.Disposable {
   private readonly vscodeThreads = new Map<string, vscode.CommentThread>();
   /** Review thread ids by VS Code thread (only for threads that are saved in the review) */
   private readonly threadIds = new WeakMap<vscode.CommentThread, string>();
+  /** The content that each VS Code comment shows, as a JSON key that getVscodeComments compares */
+  private readonly commentContents = new WeakMap<vscode.Comment, string>();
   private readonly subscriptions: vscode.Disposable[] = [];
   /** Gets the SendTarget of a thread (undefined = a new thread); see setSendTargetFinder */
   private findSendTarget: (threadId: string | undefined) => SendTarget = () => "ask";
@@ -103,13 +106,13 @@ export class ReviewCommentController implements vscode.Disposable {
     for (let thread of this.model.snapshot.review?.threads ?? []) {
       let vscodeThread = this.vscodeThreads.get(thread.id);
       if (vscodeThread)
-        vscodeThread.contextValue = this.getContextValue(thread);
+        assignChangedProperties(vscodeThread, { contextValue: this.getContextValue(thread) });
     }
   }
 
-  /** Gets the `contextValue` of a VS Code thread, for scripts/smoke-test.ts. */
-  getThreadContextValue(threadId: string): string | undefined {
-    return this.vscodeThreads.get(threadId)?.contextValue;
+  /** Gets the VS Code thread of a review thread, for scripts/smoke-test.ts. */
+  getVscodeThread(threadId: string): vscode.CommentThread | undefined {
+    return this.vscodeThreads.get(threadId);
   }
 
   /** Expands a review thread's widget in the editors that show it, e.g. before revealing it. */
@@ -197,18 +200,39 @@ export class ReviewCommentController implements vscode.Disposable {
       vscodeThread.range = range;
     }
     vscodeThread.canReply = true;
-    vscodeThread.label = [thread.severity ?? "Comment", location.isOutdated ? "outdated" : ""]
-      .filter(s => s !== "").join(" · ");
-    vscodeThread.state = thread.status === "resolved"
-      ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
-    vscodeThread.contextValue = this.getContextValue(thread);
-    vscodeThread.comments = thread.comments.map(comment => ({
-      body: new vscode.MarkdownString(comment.body),
-      mode: vscode.CommentMode.Preview,
-      author: { name: getAuthorLabel(thread, comment) },
-      timestamp: new Date(comment.createdAt),
-      contextValue: comment.author.kind,
-    }));
+    // model.refresh shows the threads again even if nothing changed
+    assignChangedProperties(vscodeThread, {
+      label: [thread.severity ?? "Comment", location.isOutdated ? "outdated" : ""].filter(s => s !== "").join(" · "),
+      state: thread.status === "resolved" ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved,
+      contextValue: this.getContextValue(thread),
+      comments: this.getVscodeComments(thread, vscodeThread.comments),
+    });
+  }
+
+  /**
+   * Converts a thread's comments to VS Code comments, reusing those in `shownComments` (the
+   * comments its VS Code thread has now) that show the same content. VS Code tells comments apart
+   * by object identity: it replaces the widget of each new comment object, and the new widget of a
+   * long comment (whose height is capped) lacks a scrollbar until something resizes the editor.
+   */
+  private getVscodeComments(thread: ReviewThread, shownComments: readonly vscode.Comment[]): vscode.Comment[] {
+    let shownByContent = new Map(shownComments.map(c => [this.commentContents.get(c), c]));
+    return thread.comments.map(comment => {
+      let author = getAuthorLabel(thread, comment);
+      let content = JSON.stringify([comment.id, comment.body, author, comment.createdAt, comment.author.kind]);
+      let vscodeComment = shownByContent.get(content);
+      if (vscodeComment === undefined) {
+        vscodeComment = {
+          body: new vscode.MarkdownString(comment.body),
+          mode: vscode.CommentMode.Preview,
+          author: { name: author },
+          timestamp: new Date(comment.createdAt),
+          contextValue: comment.author.kind,
+        };
+        this.commentContents.set(vscodeComment, content);
+      }
+      return vscodeComment;
+    });
   }
 
   /**

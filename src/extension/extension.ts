@@ -33,8 +33,8 @@ export interface BranchReviewStudioExports {
   handleReviewViewMessage: (message: unknown) => Promise<void>;
   /** Handles a message as if the open settings panel's script had posted it */
   handleSettingsPanelMessage: (message: unknown) => Promise<void>;
-  /** Gets the `contextValue` of a thread's VS Code thread, which tells the menus its Send button */
-  getThreadContextValue: (threadId: string) => string | undefined;
+  /** Gets a review thread's VS Code thread, whose `contextValue` tells the menus its Send button */
+  getVscodeThread: (threadId: string) => vscode.CommentThread | undefined;
   /** The provider of the "+" (new thread) ranges, whose method scripts/smoke-test.ts wraps */
   commentingRangeProvider: vscode.CommentingRangeProvider | undefined;
   vscodeChat: VscodeChatIntegration;
@@ -74,7 +74,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Branch
   return { model, getSettingsPanelHtml: SettingsPanel.getHtmlIfOpen, getReviewViewHtml: () => view.getBody(),
     handleReviewViewMessage: message => view.handleMessage(message),
     handleSettingsPanelMessage: SettingsPanel.handleMessageIfOpen,
-    getThreadContextValue: threadId => comments?.getThreadContextValue(threadId),
+    getVscodeThread: threadId => comments?.getVscodeThread(threadId),
     commentingRangeProvider: comments?.commentingRangeProvider, vscodeChat };
 }
 
