@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  AgentChoice, buildChatThreadPrompt, buildReviewPrompt, buildThreadPrompt, getAgentChoices, groupingInstructions,
-  mcpServerName,
+  AgentChoice, buildChatThreadPrompt, buildReviewPrompt, buildThreadPrompt, findingInstructions, getAgentChoices,
+  groupingInstructions, mcpServerName,
 } from "./agent-commands";
 import { createAnchor, splitLines } from "./anchoring";
 import { addComment, addThread, createReview } from "./review";
@@ -113,6 +113,12 @@ describe("buildReviewPrompt", () => {
     expect(buildReviewPrompt("feature/x", "develop")).toBe("Use the " + mcpServerName + " skill to review branch "
       + "`feature/x` against `develop`. If you don't have that skill, call review_begin (`" + mcpServerName
       + "` MCP tools) and follow its instructions.");
+  });
+});
+
+describe("findingInstructions", () => {
+  it("lists every severity, most severe first", () => {
+    expect(findingInstructions).toContain("severity (Critical, Major, Minor, Nit or Note)");
   });
 });
 

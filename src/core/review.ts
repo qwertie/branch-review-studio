@@ -111,9 +111,14 @@ export type AgentKind = "claude" | "codex";
  * this extension and whose chats can't be forked or resumed.
  */
 export type IntegrationId = AgentKind | "vscodeChat";
-/** Severities that an agent can give a finding, most severe first. */
-export const severities = ["Critical", "Major", "Minor", "Note"] as const;
+/**
+ * Severities that an agent can give a finding, most severe first. 'Nit' = cosmetic issue; 'Note' =
+ * not a defect, e.g. an observation or a question.
+ */
+export const severities = ["Critical", "Major", "Minor", "Nit", "Note"] as const;
 export type Severity = typeof severities[number];
+/** Lists the severities for agent-facing text: "Critical, Major, ... or Note". */
+export const severityList = `${severities.slice(0, -1).join(", ")} or ${severities.at(-1)}`;
 export type ThreadStatus = "open" | "resolved";
 /** 'modified' = working-tree file; 'base' = file content at the merge-base */
 export type DiffSide = "modified" | "base";

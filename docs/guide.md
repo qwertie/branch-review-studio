@@ -111,10 +111,10 @@ The skill (`skills/branch-review-studio/SKILL.md`, based on an in-house `/branch
 fetches the base branch, checks whether the branch is behind it, runs the repo's tests (found in
 its docs and manifests), reviews correctness, security, performance, project conventions (from
 `CLAUDE.md`, `AGENTS.md` and skill/rule docs) and dependency changes, skips findings that existing
-threads already raise, posts Critical and Major findings (plus Minor with `--all`) as threads,
-posts groups of related changes, and summarizes the changes and findings in chat. Options:
-`--all`, `--no-tests`, `--base <branch>`, `--thorough`, plus free-form context. It never switches
-branches or stashes.
+threads already raise, posts Critical, Major and Minor findings as threads (only Critical and
+Major with `--no-minor`; also cosmetic Nits with `--all`), posts groups of related changes, and
+summarizes the changes and findings in chat. Options: `--no-minor`, `--all`, `--no-tests`,
+`--base <branch>`, `--thorough`, plus free-form context. It never switches branches or stashes.
 
 ## Usage
 

@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { groupingInstructions, mcpServerName } from "../core/agent-commands";
-import { severities } from "../core/review";
+import { severities, severityList } from "../core/review";
 import { identifyCaller, ReviewTools } from "./review-tools";
 
 /** package.json's version, which esbuild.mjs substitutes at build time */
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
       endLine: z.number().int().optional().describe("Last line (default: same as line)"),
       side: z.enum(["modified", "base"]).optional()
         .describe("'modified' (default) = working-tree file; 'base' = file at the merge-base, e.g. for removed code"),
-      severity: z.enum(severities).describe("Critical, Major, Minor or Note"),
+      severity: z.enum(severities).describe(severityList),
       body: z.string().describe("Markdown: the finding and its concrete consequence"),
     },
   }, (args, extra) => runTool(extra, tools => tools.addReviewComment(args)));

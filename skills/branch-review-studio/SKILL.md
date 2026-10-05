@@ -22,7 +22,9 @@ below and don't re-raise what existing threads already say.
 The user's request (e.g. the text after `/branch-review-studio` or `$branch-review-studio`) may
 contain, in any order:
 
-- `--all`: also show and post Minor findings (Nits stay suppressed)
+- `--no-minor`, or a request such as "major only", "skip minor findings" or "just the important
+  stuff": show and post only Critical and Major findings, not Minor ones
+- `--all`: also show and post Nits (cosmetic findings)
 - `--no-tests`: skip the test runs
 - `--base <branch>`: compare against this branch instead of the review's base branch
 - `--thorough`, or a request such as "be thorough", "be comprehensive", "deep review", "use
@@ -85,6 +87,8 @@ suite run; if a suite can't run, say why.
 > 3. It violates a rule documented in the repo's `CLAUDE.md`, `AGENTS.md`, or skill/rule docs.
 > 4. It would cause a concrete future problem: perf regression, data loss, breaking change, or test fragility.
 >
+> Exception: if you were told that the review includes Nits (`--all`), a cosmetic issue also qualifies, as a Nit; the DO NOT FLAG list below still applies.
+>
 > Every finding needs a concrete scenario: the inputs, state or timing that make the code
 > misbehave, and the wrong result (or, for a convention, the quoted rule and the line that breaks it).
 >
@@ -92,7 +96,7 @@ suite run; if a suite can't run, say why.
 > - **Critical** — would block merge: bug, security, data loss.
 > - **Major** — should be fixed before merge: significant correctness/perf issue or documented-convention violation.
 > - **Minor** — nice to fix, not blocking: small refactor, missing edge-case test.
-> - **Nit** — cosmetic. EXCLUDE entirely; `--all` does not surface them.
+> - **Nit** — cosmetic, e.g. a typo in a name, comment, message or doc. Report Nits only under the exception above.
 >
 > **DO NOT FLAG (these are noise that drives churn between runs):**
 > - "Consider extracting this into a helper" without a concrete reason.
@@ -171,7 +175,8 @@ rule.
 **Thorough mode:** if you can launch subagents (e.g. Claude Code's Agent tool or VS Code's
 `runSubagent` tool), launch five reviewers in parallel, one per dimension, and brief each like a
 colleague: the merge-base SHA and the diff commands from Step 1, the `--numstat` summary, the
-user's context, the already-raised set, the threshold verbatim, and the output format. They read
+user's context, the already-raised set, the threshold verbatim, whether the review includes Nits
+(`--all`), and the output format. They read
 the diff and files themselves; don't pre-summarize. An empty answer is valid. When they return,
 run one verifier per Critical or Major candidate (in parallel) that gets the candidate, the diff
 and the relevant files, and answers exactly one of: **CONFIRMED** (names the triggering
@@ -216,10 +221,10 @@ each group's diffs show only that group's changes.)
    root issue; prefer the more specific wording.
 3. Drop anything covered by an already-raised thread — that's the cross-run convergence mechanism.
 4. Assign findings to the groups from Step 4.
-5. Within each group, sort by severity (Critical → Major → Minor), then file path, then line.
-6. By default keep Critical + Major only. If Minor findings exist, end the list with
-   `(N Minor findings hidden — re-run with --all to see them)`.
-7. Nits are dropped entirely, regardless of `--all`.
+5. Within each group, sort by severity (Critical → Major → Minor → Nit), then file path, then line.
+6. With `--no-minor`, keep Critical + Major only. If Minor findings exist, end the list with
+   `(N Minor findings hidden — re-run without --no-minor to see them)`.
+7. Without `--all`, drop Nits.
 
 ## Step 6 — Post to Branch Review Studio
 

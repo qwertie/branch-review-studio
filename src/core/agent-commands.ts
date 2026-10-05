@@ -1,12 +1,12 @@
 import { AnchorLocation } from "./anchoring";
-import { AgentKind, getAuthorLabel, IntegrationId, Review, ReviewThread } from "./review";
+import { AgentKind, getAuthorLabel, IntegrationId, Review, ReviewThread, severityList } from "./review";
 
 /** Name under which the MCP server is registered with agents (`claude mcp add <name>`). */
 export const mcpServerName = "branch-review-studio";
 
 /** Tells an agent how to post findings; review_begin returns it. */
 export const findingInstructions = "Post each finding with review_comment: file, line (and endLine for a range), "
-  + "severity (Critical, Major, Minor or Note) and a markdown body that states the concrete consequence. Line "
+  + `severity (${severityList}) and a markdown body that states the concrete consequence. Line `
   + "numbers refer to the working-tree file; for removed code, use side \"base\" and line numbers in the merge-base "
   + "version.";
 
