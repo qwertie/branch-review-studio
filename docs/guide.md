@@ -70,9 +70,8 @@ Nothing in your repos needs to change, and coworkers who don't install it are un
    (gear button), or run the command **Branch Review Studio: Install MCP Server and Skill (Claude
    Code, Codex)**, which installs for every agent whose CLI it finds. It requires `node` on PATH.
    Installing copies the server to `~/.branch-review-studio/mcp-server.js` (a stable path, so
-   extension updates don't break the registration; the extension refreshes this copy when it
-   changes), registers it, and copies `skills/branch-review-studio/SKILL.md` into the agent's
-   skill folder:
+   extension updates don't break the registration), registers it, and copies
+   `skills/branch-review-studio/SKILL.md` into the agent's skill folder:
    - Claude Code: `claude mcp add --scope user branch-review-studio -- node <that path>`, which
      adds an entry under `mcpServers` in `~/.claude.json`; skill in
      `~/.claude/skills/branch-review-studio/`.
@@ -80,6 +79,9 @@ Nothing in your repos needs to change, and coworkers who don't install it are un
      `[mcp_servers.branch-review-studio]` table (`command` and `args`) to `~/.codex/config.toml`.
      The Codex CLI, the Codex VS Code extension and the Codex app all read that file. Skill in
      `~/.agents/skills/branch-review-studio/`.
+
+   You needn't install again after updating the extension: when it starts, it replaces these copies
+   of the server and skill if they differ from its own (it doesn't recreate ones you've deleted).
    VS Code's chat needs no install (see "VS Code Chat" below).
 4. To remove them, click **Uninstall** in the panel, or run **Branch Review Studio: Uninstall MCP
    Server and Skills** (or run `claude mcp remove --scope user branch-review-studio` and

@@ -238,8 +238,8 @@ ${renderTable(rows)}
       : skillCopy === undefined ? `<span class="ok">provided</span> by this extension`
         : `VS Code uses your copy <code>${escapeHtml(skillCopy.path)}</code>, since skills in your skill folders take `
           + "precedence over skills that extensions provide; " + (skillCopy.isCurrent ? "it is this version's skill"
-            : `<span class="error">it differs from this version's skill</span> (to update a copy that this extension `
-              + "installed, click Install MCP Server and Skill above)");
+            : `<span class="error">it differs from this version's skill</span> (when VS Code starts, this extension `
+              + "updates the copies it installs in Claude Code's and Codex's skill folders)");
     let rows = [
       [`MCP server <code>${mcpServerName}</code>`, server
         ? `<span class="ok">registered</span>: VS Code runs <code>${escapeHtml([server.command, ...server.args]

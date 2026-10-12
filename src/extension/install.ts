@@ -4,7 +4,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { mcpServerName } from "../core/agent-commands";
 import { AgentCommand, AgentIntegration, runAgentCommand } from "../core/agent-integration";
-import { getErrorMessage, readFileIfExists } from "../core/files";
+import { getErrorMessage, updateFileIfOutdated } from "../core/files";
 import {
   agentIntegrations, AgentServices, findAgentCommand, getBundledServerPath, getBundledSkillPath,
 } from "./agents";
@@ -80,13 +80,22 @@ export async function uninstallForAgent(services: AgentServices, integration: Ag
   });
 }
 
-/** If the MCP server is installed but differs from this extension version's copy, replaces it. */
-export async function updateInstalledServerIfOutdated(context: vscode.ExtensionContext,
+/**
+ * Replaces the installed MCP server and each agent's installed skill with this extension version's
+ * copy if they differ, so that upgrading the extension upgrades them; installs nothing new. Logs
+ * updates and errors rather than throwing.
+ */
+export async function updateInstalledFilesIfOutdated(context: vscode.ExtensionContext,
   log: vscode.OutputChannel): Promise<void> {
-  let installed = await readFileIfExists(installedServerPath);
-  if (installed !== undefined && installed !== await fs.readFile(getBundledServerPath(context), "utf8")) {
-    await copyServer(context);
-    log.appendLine(`Updated ${installedServerPath}`);
+  let files = [[installedServerPath, getBundledServerPath(context)],
+    ...agentIntegrations.map(i => [getInstalledSkillPath(i), getBundledSkillPath(context)])];
+  for (let [installedPath, bundledPath] of files) {
+    try {
+      if (await updateFileIfOutdated(installedPath, bundledPath))
+        log.appendLine(`Updated ${installedPath}`);
+    } catch (e) {
+      log.appendLine(`Could not update ${installedPath}: ${getErrorMessage(e)}`);
+    }
   }
 }
 
@@ -123,10 +132,15 @@ async function runInstallStep(services: AgentServices, integration: AgentIntegra
 /** Copies the skill into the agent's skill folder and returns the folder. */
 async function installSkillForAgent(context: vscode.ExtensionContext, integration: AgentIntegration)
   : Promise<string> {
-  let skillDir = integration.getSkillDir(os.homedir());
-  await fs.mkdir(skillDir, { recursive: true });
-  await fs.copyFile(getBundledSkillPath(context), path.join(skillDir, "SKILL.md"));
-  return skillDir;
+  let skillPath = getInstalledSkillPath(integration);
+  await fs.mkdir(path.dirname(skillPath), { recursive: true });
+  await fs.copyFile(getBundledSkillPath(context), skillPath);
+  return path.dirname(skillPath);
+}
+
+/** Gets where installSkillForAgent puts the skill for an agent. */
+function getInstalledSkillPath(integration: AgentIntegration): string {
+  return path.join(integration.getSkillDir(os.homedir()), "SKILL.md");
 }
 
 async function copyServer(context: vscode.ExtensionContext): Promise<void> {

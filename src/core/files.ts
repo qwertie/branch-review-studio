@@ -27,6 +27,19 @@ export async function readFileIfExists(filePath: string): Promise<string | undef
   }
 }
 
+/**
+ * If a file was installed at `installedPath` but its contents differ from `sourcePath`, overwrites
+ * it with a copy of `sourcePath`. Never creates a missing file, so that uninstalling sticks.
+ * Returns true if it overwrote the file.
+ */
+export async function updateFileIfOutdated(installedPath: string, sourcePath: string): Promise<boolean> {
+  let installed = await readFileIfExists(installedPath);
+  let isOutdated = installed !== undefined && installed !== await fs.readFile(sourcePath, "utf8");
+  if (isOutdated)
+    await fs.copyFile(sourcePath, installedPath);
+  return isOutdated;
+}
+
 /** Converts a repo-relative path with forward slashes into an absolute native path. */
 export function getFullPath(repoRoot: string, file: string): string {
   return path.join(repoRoot, ...file.split("/"));

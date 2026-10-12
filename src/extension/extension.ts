@@ -1,6 +1,5 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { getErrorMessage } from "../core/files";
 import { findRepoRoot, getGitCommonDir, getGitDir } from "../core/git";
 import { IntegrationErrorLog } from "../core/integration-status";
 import { IntegrationId } from "../core/review";
@@ -15,7 +14,7 @@ import { changeBaseBranch } from "./change-base-branch";
 import { ReviewCommentController } from "./comments";
 import { clearReview, deleteResolvedThreads } from "./delete-commands";
 import { fetchBase, openAllChanges, openFileDiff, openGroupChanges } from "./diff-commands";
-import { installMcpServer, installSkill, uninstall, updateInstalledServerIfOutdated } from "./install";
+import { installMcpServer, installSkill, uninstall, updateInstalledFilesIfOutdated } from "./install";
 import { BranchReviewModel } from "./model";
 import { ReviewViewProvider, reviewViewId } from "./review-view";
 import { SettingsPanel } from "./settings-panel";
@@ -49,7 +48,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Branch
   context.subscriptions.push(log);
   let services: AgentServices = { context, log,
     errors: new IntegrationErrorLog(context.globalState, () => SettingsPanel.renderIfOpen()) };
-  void updateInstalledServerIfOutdated(context, log).catch(e => log.appendLine(getErrorMessage(e)));
+  void updateInstalledFilesIfOutdated(context, log);
   let model = await createModel(log);
   let vscodeChat = new VscodeChatIntegration(services, model);
   context.subscriptions.push(vscodeChat);
