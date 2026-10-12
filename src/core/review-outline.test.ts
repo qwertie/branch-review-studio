@@ -23,8 +23,10 @@ function thread(id: string, file: string, createdLine: number, currentLine = cre
 }
 
 function group(id: string | undefined, name: string, files: [path: string, isPartial?: boolean][],
-  changedLines = 1): ArrangedGroup {
-  return { id, name, summary: `Summary of ${name}`, changedLines: id === undefined ? undefined : changedLines,
+  [addedLines, removedLines] = [1, 0]): ArrangedGroup {
+  let isUngrouped = id === undefined;
+  return { id, name, summary: `Summary of ${name}`, changedLines: isUngrouped ? undefined : addedLines + removedLines,
+    addedLines: isUngrouped ? undefined : addedLines, removedLines: isUngrouped ? undefined : removedLines,
     files: files.map(([path, isPartial = false]) => ({ path, isPartial })) };
 }
 
@@ -44,7 +46,7 @@ const threads = [thread("b1", "src/b.cs", 20), thread("b2", "src/b.cs", 50, 10),
  * Groups: "small" has the second part of b.cs; "big" has a.cs and all of b.cs; Ungrouped has c.cs
  */
 const layout: GroupLayout = { isStale: false, groups: [group("small", "Small", [["src/b.cs", true]]),
-  group("big", "Big", [["a.cs"], ["src/b.cs", false]], 9), group(undefined, "Ungrouped", [["c.cs"],
+  group("big", "Big", [["a.cs"], ["src/b.cs", false]], [7, 2]), group(undefined, "Ungrouped", [["c.cs"],
     ["unchanged.cs"]])] };
 
 function getIds(outline: ReviewOutline): string[] {
@@ -150,17 +152,17 @@ describe("listChangesEntries", () => {
         : `${e.change.path}${e.viewGroupId ? ` (view of ${e.viewGroupId})` : ""}`);
       // src/b.cs isn't partial in "big", but it was already shown, and VS Code fails on duplicate
       // entries
-      expect(entries).toEqual(["# 1. Small — 1 line, 1 file.md", "src/b.cs (view of small)",
-        "# 2. Big — 9 lines, 2 files.md", "a.cs", "src/b.cs (view of big)", "# Ungrouped — 2 files.md", "c.cs"]);
+      expect(entries).toEqual(["# 1. Small — +1 line, 1 file.md", "src/b.cs (view of small)",
+        "# 2. Big — +7 −2 lines, 2 files.md", "a.cs", "src/b.cs (view of big)", "# Ungrouped — 2 files.md", "c.cs"]);
       expect(getGroupHeading(outline, outline.sections[1]).text)
-        .toBe("# 2. Big\n\n9 lines, 2 files\n\nSummary of Big\n");
+        .toBe("# 2. Big\n\n+7 −2 lines, 2 files\n\nSummary of Big\n");
     });
 
   it("lists one group's entries, or files by path without groups or with stale groups", () => {
     let grouped = createOutline(["src/b.cs", "c.cs", "a.cs"], threads, layout);
     expect(listChangesEntries(grouped, [grouped.sections[1]])
       .map(e => e.kind === "file" ? e.viewGroupId ?? e.change.path : e.fileName))
-      .toEqual(["2. Big — 9 lines, 2 files.md", "a.cs", "src/b.cs"]);
+      .toEqual(["2. Big — +7 −2 lines, 2 files.md", "a.cs", "src/b.cs"]);
     for (let outline of [createOutline(["src/b.cs", "c.cs", "a.cs"], threads),
       createOutline(["src/b.cs", "c.cs", "a.cs"], threads, { ...layout, isStale: true })]) {
       expect(listChangesEntries(outline).map(e => e.kind === "file" && !e.viewGroupId && e.change.path))
@@ -171,6 +173,6 @@ describe("listChangesEntries", () => {
   it("replaces slashes in group names, since the heading's file name is a URI path", () => {
     let outline = createOutline(["a.cs"], [], { isStale: false, groups: [group("g", "Fix a/b", [["a.cs"]])] });
     expect(listChangesEntries(outline)[0])
-      .toMatchObject({ kind: "heading", fileName: "1. Fix a-b — 1 line, 1 file.md" });
+      .toMatchObject({ kind: "heading", fileName: "1. Fix a-b — +1 line, 1 file.md" });
   });
 });

@@ -32,9 +32,14 @@ export interface ArrangedGroup {
   summary: string;
   /**
    * Number of changed lines in the group's hunks: the sum of max(oldCount, newCount) over its
-   * hunks, so that a changed line counts once; undefined for the Ungrouped group
+   * hunks, so that a changed line counts once; undefined for the Ungrouped group. Groups are
+   * sorted by it.
    */
   changedLines: number | undefined;
+  /** Number of lines that the group's hunks add (sum of newCount); undefined for Ungrouped */
+  addedLines: number | undefined;
+  /** Number of lines that the group's hunks remove (sum of oldCount); undefined for Ungrouped */
+  removedLines: number | undefined;
   /** Sorted by path */
   files: ArrangedFile[];
 }
@@ -210,27 +215,37 @@ export function arrangeGroups(changeGroups: ChangeGroups, changedFiles: string[]
   let groupedFiles = changeGroups.files.filter(f => changedFiles.includes(f.file));
   let groups: ArrangedGroup[] = changeGroups.groups.map(group => {
     let files = groupedFiles.filter(f => getFileGroupIds(f).includes(group.id));
-    let changedLines = files.flatMap(f => f.hunks.filter(h => h.groupIds.includes(group.id)))
-      .reduce((sum, h) => sum + Math.max(h.oldCount, h.newCount), 0);
+    let hunks = files.flatMap(f => f.hunks.filter(h => h.groupIds.includes(group.id)));
+    let sumHunks = (count: (hunk: GroupedHunk) => number) => hunks.reduce((sum, h) => sum + count(h), 0);
     let arrangedFiles = files.map(f => ({ path: f.file, isPartial: !isStale && f.hunks.some(h => isHiddenInView(h,
       group.id)) }));
-    return { ...group, changedLines, files: arrangedFiles.sort(comparePaths) };
+    return { ...group, changedLines: sumHunks(h => Math.max(h.oldCount, h.newCount)),
+      addedLines: sumHunks(h => h.newCount), removedLines: sumHunks(h => h.oldCount),
+      files: arrangedFiles.sort(comparePaths) };
   }).sort((a, b) => a.changedLines - b.changedLines);
   let ungroupedFiles = [...changedFiles.filter(file => !groups.some(g => g.files.some(f => f.path === file))),
     ...unchangedFiles];
   if (ungroupedFiles.length > 0) {
-    groups.push({ id: undefined, name: ungroupedName, changedLines: undefined,
+    groups.push({ id: undefined, name: ungroupedName, changedLines: undefined, addedLines: undefined,
+      removedLines: undefined,
       summary: "Files that no group includes, e.g. files changed after the groups were posted.",
       files: ungroupedFiles.map(path => ({ path, isPartial: false })).sort(comparePaths) });
   }
   return { groups, isStale };
 }
 
-/** Describes a group's size, e.g. "12 lines, 3 files", "no changes" (the Ungrouped group: "3 files"). */
+/**
+ * Describes a group's size by the numbers of lines that its hunks add and remove and its number of
+ * files, e.g. "+12 −3 lines, 3 files", "+1 line, 1 file" (a zero count is left out), "no changes"
+ * (the Ungrouped group: "3 files").
+ */
 export function describeGroupSize(group: ArrangedGroup): string {
   if (group.files.length === 0)
     return "no changes";
-  return (group.changedLines === undefined ? "" : formatCount(group.changedLines, "line") + ", ")
+  let { addedLines = 0, removedLines = 0 } = group;
+  let lineCounts = [addedLines && `+${addedLines}`, removedLines && `−${removedLines}`].filter(c => c).join(" ")
+    || "0";
+  return (group.id === undefined ? "" : `${lineCounts} line${addedLines + removedLines === 1 ? "" : "s"}, `)
     + formatCount(group.files.length, "file");
 }
 

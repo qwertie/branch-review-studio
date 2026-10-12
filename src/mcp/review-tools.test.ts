@@ -137,8 +137,8 @@ describe("ReviewTools", () => {
       ] });
       expect(result).toBe("Saved the groups. Branch Review Studio shows them smallest first:\n"
         + "- Unused (no changes)\n"
-        + "- New file b (1 line, 1 file): src/b.ts (partial)\n"
-        + "- Return 2 (2 lines, 2 files): src/a.ts, src/b.ts (partial)\n\n"
+        + "- New file b (+1 line, 1 file): src/b.ts (partial)\n"
+        + "- Return 2 (+2 −1 lines, 2 files): src/a.ts, src/b.ts (partial)\n\n"
         + "To correct the following, call review_set_groups again (it replaces the groups):\n"
         + "- src/b.ts: the range 9-9 of group 'b' overlaps no change.\n"
         + "- src/b.ts: no range covers line 3, so these changes appear in every group that lists the file.\n"

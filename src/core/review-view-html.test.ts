@@ -20,8 +20,10 @@ function createOutline(): ReviewOutline {
       { path: `dir/${evil}.cs`, status: "Added" }],
     groupLayout: { isStale: false, groups: [
       { id: "g1", name: `Group ${evil}`, summary: `Summary **bold** ${evil}`, changedLines: 4,
+        addedLines: 3, removedLines: 1,
         files: [{ path: "a.cs", isPartial: true }, { path: `dir/${evil}.cs`, isPartial: false }] },
-      { id: undefined, name: "Ungrouped", summary: "Others", changedLines: undefined,
+      { id: undefined, name: "Ungrouped", summary: "Others", changedLines: undefined, addedLines: undefined,
+        removedLines: undefined,
         files: [{ path: "b.cs", isPartial: false }] }] } });
 }
 
@@ -41,8 +43,8 @@ describe("renderReviewViewBody", () => {
   it("shows numbered groups with summaries, files with status and counts, threads by line without markdown",
     () => {
       let html = render();
-      let order = ["1. Group", "Summary <strong>bold</strong>", ">a.cs<", ">partial<", "Major: first", "Minor: second",
-        ">Ungrouped<", ">b.cs<"].map(text => html.indexOf(text));
+      let order = ["1. Group", "+3 −1 lines, 2 files", "Summary <strong>bold</strong>", ">a.cs<", ">partial<",
+        "Major: first", "Minor: second", ">Ungrouped<", ">b.cs<"].map(text => html.indexOf(text));
       expect(order.every(i => i >= 0), `positions ${order}`).toBe(true);
       expect(order).toEqual([...order].sort((a, b) => a - b));
       expect(html).toContain(`title="2 open threads">2</span>`);

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { getChangedFiles } from "./git";
 import {
-  arrangeGroups, assignHunksToGroups, buildGroupViewText, ChangeGroupsInput, createChangeGroups, FileGroupsInput,
+  arrangeGroups, assignHunksToGroups, buildGroupViewText, ChangeGroupsInput, createChangeGroups, describeGroupSize,
+  FileGroupsInput,
 } from "./groups";
 import { ChangeGroups, GroupedFile, GroupedHunk } from "./review";
 import { TempRepo } from "./test-helpers";
@@ -141,5 +142,26 @@ describe("arrangeGroups", () => {
 
     expect(layout.isStale).toBe(true);
     expect(describeLayout(layout)).toEqual(["Tie 0: ", "Gone 0: ", "Small 2: z.ts", "Big 10: z.ts"]);
+  });
+
+  it("counts the lines that each group's hunks add and remove", () => {
+    let layout = arrangeGroups({ ...changeGroups, files: [...changeGroups.files,
+      file("new.ts", { oldStart: 0, oldCount: 0, newCount: 7, groupIds: ["small"] })] },
+    ["a.ts", "image.png", "new.ts", "t.ts", "unassigned.ts", "z.ts"], "mb");
+
+    expect(layout.groups.map(g => `${g.name}: ${describeGroupSize(g)}`)).toEqual(["Gone: no changes",
+      "Tie: +1 −2 lines, 2 files", "Small: +8 −2 lines, 3 files", "Big: +2 −15 lines, 2 files"]);
+  });
+});
+
+describe("describeGroupSize", () => {
+  const describeSize = (addedLines: number | undefined, removedLines: number | undefined, fileCount = 1) =>
+    describeGroupSize({ id: addedLines === undefined ? undefined : "g", name: "", summary: "", changedLines: 0,
+      addedLines, removedLines, files: Array.from({ length: fileCount }, () => ({ path: "", isPartial: false })) });
+
+  it("leaves out a zero count of added or removed lines, and the line counts of Ungrouped", () => {
+    expect([describeSize(1, 0), describeSize(0, 4, 2), describeSize(0, 0), describeSize(undefined, undefined, 3),
+      describeSize(1, 0, 0)]).toEqual(["+1 line, 1 file", "−4 lines, 2 files", "0 lines, 1 file", "3 files",
+      "no changes"]);
   });
 });

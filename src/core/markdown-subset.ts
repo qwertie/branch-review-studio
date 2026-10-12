@@ -2,7 +2,9 @@
  * Renders agent-written markdown (group summaries, review summaries) as HTML for the Branch Review
  * webview. Only a safe subset is supported: all HTML in the input is escaped first, then **bold**,
  * *italic*, `code`, paragraphs, line breaks, headings (as bold paragraphs) and simple lists are
- * converted. Links and images are shown as their text, so the output has no URLs or attributes.
+ * converted. As in CommonMark, a single newline is a space unless the line ends with two spaces or
+ * a backslash (a line break), so hard-wrapped text such as commit messages reflows. Links and
+ * images are shown as their text, so the output has no URLs or attributes.
  */
 export function renderMarkdownSubset(markdown: string): string {
   // renderInline uses NUL characters as placeholders
@@ -46,27 +48,30 @@ const headingPattern = /^\s*#{1,6}\s+(.*)$/;
 
 /**
  * Renders a block of escaped markdown (text between blank lines): runs of list items become lists,
- * headings become bold paragraphs, and other runs of lines become paragraphs with line breaks.
+ * headings become bold paragraphs, and other runs of lines become paragraphs. A line that is not
+ * an item or heading continues the list item above it, if any (e.g. a wrapped bullet).
  */
 function renderBlock(block: string): string {
   let html = "";
   let paragraph: string[] = [];
-  let list: { tag: "ul" | "ol", items: string[] } | undefined;
+  /** Each item is a list of lines */
+  let list: { tag: "ul" | "ol", items: string[][] } | undefined;
   for (let line of block.split("\n").filter(l => l.trim() !== "")) {
     let item = listItemPattern.exec(line);
     let heading = headingPattern.exec(line);
     let tag: "ol" | "ul" | undefined = item ? (/\d/.test(item[1]) ? "ol" : "ul") : undefined;
-    if (tag !== list?.tag)
-      flushList();
-    if (item || heading)
+    if (item || heading) {
       flushParagraph();
+      if (tag !== list?.tag)
+        flushList();
+    }
     if (item && tag) {
       list ??= { tag, items: [] };
-      list.items.push(item[2]);
+      list.items.push([item[2]]);
     } else if (heading) {
       html += `<p><strong>${renderInline(heading[1])}</strong></p>`;
     } else {
-      paragraph.push(line.trim());
+      (list?.items.at(-1) ?? paragraph).push(line);
     }
   }
   flushList();
@@ -75,15 +80,26 @@ function renderBlock(block: string): string {
 
   function flushParagraph() {
     if (paragraph.length > 0)
-      html += `<p>${paragraph.map(renderInline).join("<br>")}</p>`;
+      html += `<p>${renderLines(paragraph)}</p>`;
     paragraph = [];
   }
 
   function flushList() {
     if (list)
-      html += `<${list.tag}>${list.items.map(i => `<li>${renderInline(i)}</li>`).join("")}</${list.tag}>`;
+      html += `<${list.tag}>${list.items.map(i => `<li>${renderLines(i)}</li>`).join("")}</${list.tag}>`;
     list = undefined;
   }
+}
+
+/**
+ * Renders the lines of a paragraph or list item (escaped markdown) as HTML, joining them with
+ * spaces, or with a line break after a line that ends with two or more spaces or a backslash.
+ */
+function renderLines(lines: string[]): string {
+  return renderInline(lines.map((line, i) => {
+    let breakMarker = i < lines.length - 1 ? /(?: {2,}|\\)$/.exec(line)?.[0] : undefined;
+    return (breakMarker === "\\" ? line.slice(0, -1) : line).trim() + (breakMarker ? "<br>" : " ");
+  }).join("").trimEnd());
 }
 
 /** Renders the inline markup of escaped markdown: code spans, emphasis, links/images as text. */

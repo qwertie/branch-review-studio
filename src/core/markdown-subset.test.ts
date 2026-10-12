@@ -2,16 +2,35 @@ import { describe, expect, it } from "vitest";
 import { renderMarkdownSubset, stripMarkdown, truncateText } from "./markdown-subset";
 
 describe("renderMarkdownSubset", () => {
-  it("renders bold, italic, code, paragraphs, line breaks and lists", () => {
-    expect(renderMarkdownSubset("**Fix** the *CSV* `quote` logic\nin two places.\n\n- one\n- two __bold__\n\n"
-      + "1. first\n2. second")).toBe("<p><strong>Fix</strong> the <em>CSV</em> <code>quote</code> logic<br>"
-      + "in two places.</p><ul><li>one</li><li>two <strong>bold</strong></li></ul><ol><li>first</li>"
+  it("renders bold, italic, code, paragraphs and lists", () => {
+    expect(renderMarkdownSubset("**Fix** the *CSV* `quote` logic in two places.\n\n- one\n- two __bold__\n\n"
+      + "1. first\n2. second")).toBe("<p><strong>Fix</strong> the <em>CSV</em> <code>quote</code> logic in two "
+      + "places.</p><ul><li>one</li><li>two <strong>bold</strong></li></ul><ol><li>first</li>"
       + "<li>second</li></ol>");
   });
 
   it("splits a paragraph followed by a list, and renders headings as bold paragraphs", () => {
-    expect(renderMarkdownSubset("## Changes\r\nThese files:\r\n* a.cs\r\n* b.cs\r\nDone."))
+    expect(renderMarkdownSubset("## Changes\r\nThese files:\r\n* a.cs\r\n* b.cs\r\n\r\nDone."))
       .toBe("<p><strong>Changes</strong></p><p>These files:</p><ul><li>a.cs</li><li>b.cs</li></ul><p>Done.</p>");
+  });
+
+  it("joins hard-wrapped lines with spaces, as in CommonMark, so wrapped commit messages reflow", () => {
+    expect(renderMarkdownSubset("Group summaries are copied from\n  commit *messages,\nwhich* are wrapped.\n\n"
+      + "Second paragraph."))
+      .toBe("<p>Group summaries are copied from commit <em>messages, which</em> are wrapped.</p>"
+        + "<p>Second paragraph.</p>");
+  });
+
+  it("breaks lines that end with two or more spaces or a backslash", () => {
+    expect(renderMarkdownSubset("one  \ntwo\\\n**three \\\nfour**   \n- item  \n  more\\"))
+      .toBe("<p>one<br>two<br><strong>three<br>four</strong></p><ul><li>item<br>more\\</li></ul>");
+  });
+
+  it("continues a list item with the lines that follow it until the next item, heading or blank line", () => {
+    expect(renderMarkdownSubset("- Wrapped bullet of a\n  commit message\n- next item\nlazy line\n1. new list\n"
+      + "# Heading\nParagraph"))
+      .toBe("<ul><li>Wrapped bullet of a commit message</li><li>next item lazy line</li></ul><ol><li>new list</li>"
+        + "</ol><p><strong>Heading</strong></p><p>Paragraph</p>");
   });
 
   it("leaves snake_case, lone asterisks and markers inside code literal", () => {

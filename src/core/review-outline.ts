@@ -118,8 +118,8 @@ export function buildReviewOutline(input: OutlineInput): ReviewOutline {
 }
 
 /**
- * Describes a section's group, e.g. "12 lines, 3 files · regroup: merge-base changed"; "" in a
- * review without groups.
+ * Describes a section's group, e.g. "+12 −3 lines, 3 files · regroup: merge-base changed"; "" in
+ * a review without groups.
  */
 export function describeSection(outline: ReviewOutline, section: OutlineSection): string {
   return section.group ? describeGroupSize(section.group)
@@ -218,8 +218,8 @@ export function listChangesEntries(outline: ReviewOutline, sections = outline.se
 
 /**
  * Gets the document that introduces a group in Open All Changes: its file name, e.g. "1. Name —
- * 12 lines, 3 files.md" (the multi-diff editor labels each entry with its document's file name),
- * and its markdown text: heading, size and summary.
+ * +12 −3 lines, 3 files.md" (the multi-diff editor labels each entry with its document's file
+ * name), and its markdown text: heading, size and summary.
  */
 export function getGroupHeading(outline: ReviewOutline, section: OutlineSection): { fileName: string, text: string } {
   let size = describeSection(outline, section);

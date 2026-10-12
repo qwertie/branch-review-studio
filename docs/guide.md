@@ -277,9 +277,11 @@ A review can divide the branch's changes into groups of related changes, e.g. "F
   The review JSON stores the hunks by merge-base line numbers (with their new lines where a view
   needs them), plus the merge-base, so later edits don't shift them. The tool's result lists
   ranges that overlap no change and changes that no range covers, so the agent can correct them.
-- **View:** each group is a numbered heading ("1. Name") with its size and number of files,
-  followed by its summary (markdown: bold, italic, code, lists; HTML and links are shown as text)
-  and its files, sorted by path, each with its threads. A file appears under every
+- **View:** each group is a numbered heading ("1. Name") with its size and number of files (e.g.
+  "+12 −3 lines, 3 files": lines added and removed by the group's hunks), followed by its summary
+  (markdown: bold, italic, code, lists; as in CommonMark, a single newline is a space unless the
+  line ends with two spaces or a backslash, so wrapped commit messages reflow; HTML and links are
+  shown as text) and its files, sorted by path, each with its threads. A file appears under every
   group whose view of it shows a change (one of the group's hunks or an unassigned hunk), and a file
   without hunks under every group listed for it; "partial" marks a file of which the group shows
   only some changes. Groups are sorted by size, smallest first, where size = the number of changed
@@ -291,7 +293,7 @@ A review can divide the branch's changes into groups of related changes, e.g. "F
   the agent about changed files it put in no group. Without groups, the view lists the files by
   path. Thread navigation visits the threads of a file that is in several groups under the first.
 - **Open All Changes** shows, for each group in the view's order, a heading entry (a read-only
-  markdown document named like "1. Name — 12 lines, 3 files.md" that holds the summary), then the
+  markdown document named like "1. Name — +12 −3 lines, 3 files.md" that holds the summary), then the
   group's files, each showing that group's view of the file. A file in several groups appears once
   per group. Ungrouped files come last, under an "Ungrouped" heading. (VS Code's multi-diff editor
   shows nothing if two entries have the same left and right documents, so a file's later

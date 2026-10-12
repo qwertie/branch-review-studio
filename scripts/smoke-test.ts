@@ -10,6 +10,7 @@ import * as vscode from "vscode";
 import { AgentRunMode, AgentSessionMode, getAgentChoices } from "../src/core/agent-commands";
 import { createAnchor } from "../src/core/anchoring";
 import { ChangedFile, getBaseBranchChoices, getFileAtRevision, listBranches, MergeBaseInfo } from "../src/core/git";
+import { describeGroupSize } from "../src/core/groups";
 import { applyHunks, DiffHunk, readDiffHunks } from "../src/core/hunks";
 import {
   addComment, addThread, createReview, findLatestSession, formatCount, getResolvedThreadIds, getThread, IntegrationId,
@@ -792,8 +793,9 @@ async function checkReviewUi(model: Model, exports: BranchReviewStudioExports,
           "could not edit the file in the multi-diff editor");
         await fileEditor.edit(b => b.delete(new vscode.Range(start, start.translate(0, 1))));
         await fileEditor.document.save();
-        let headingText = headings[0]?.document.getText();
-        assert.ok(headingText?.startsWith("# 1. Smoke: first hunk\n\n1 line, 1 file\n\nThe **first**"),
+        let headingText = headings[0]?.document.getText() ?? "";
+        let firstSize = describeGroupSize(model.snapshot.groupLayout!.groups.find(g => g.id === "first")!);
+        assert.ok(headingText.startsWith(`# 1. Smoke: first hunk\n\n${firstSize}\n\nThe **first**`),
           `heading: ${headingText}`);
         // Makes room so that the screenshot shows the second group
         for (let command of ["workbench.action.closePanel", "workbench.action.closeAuxiliaryBar",
@@ -880,7 +882,11 @@ async function postSmokeGroups(model: Model, split: { file: ChangedFile, hunks: 
   let result = await tools.setGroups({ groups: [{ id: "first", name: "Smoke: first hunk", summary: "The **first** "
     + "hunk of a file with several hunks; this summary is long enough to be wrapped onto two lines.\n\n- It has "
     + "a list with `code`\n- and <img src=x onerror=alert(1)> [a link](javascript:alert(1))" },
-  { id: "rest", name: "Smoke: the rest", summary: "Everything else." }],
+  { id: "rest", name: "Smoke: the rest", summary: "Everything else. This summary is wrapped like a commit\n"
+    + "message, so that the screenshots show how the view and the heading entry\npresent a long, wrapped "
+    + "summary.\n\n- A bullet of a commit message, wrapped onto a\n  second line\n"
+    + "- Another bullet\n\nA third paragraph, also wrapped onto\nseveral lines, so that the summary\nhas more "
+    + "than ten lines in all." }],
   files: [{ file: split.file.path, groups: [
     { groupId: "first", ranges: [{ startLine: firstHunk.newStart, endLine: firstHunk.newStart }] },
     { groupId: "rest", ranges: split.hunks.slice(1).map(h => ({ startLine: Math.max(h.newStart, 1),
