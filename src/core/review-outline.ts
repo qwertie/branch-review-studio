@@ -219,10 +219,14 @@ export function listChangesEntries(outline: ReviewOutline, sections = outline.se
 /**
  * Gets the document that introduces a group in Open All Changes: its file name, e.g. "1. Name —
  * +12 −3 lines, 3 files.md" (the multi-diff editor labels each entry with its document's file
- * name), and its markdown text: heading, size and summary.
+ * name); its markdown `text` (heading, size and summary); and `originalText`, which lacks the
+ * heading and size lines. The multi-diff editor shows a diff from `originalText` to `text`, so
+ * that only the heading and size lines are marked as added (green).
  */
-export function getGroupHeading(outline: ReviewOutline, section: OutlineSection): { fileName: string, text: string } {
+export function getGroupHeading(outline: ReviewOutline, section: OutlineSection)
+  : { fileName: string, text: string, originalText: string } {
   let size = describeSection(outline, section);
+  let originalText = `\n${section.group?.summary ?? ""}\n`;
   return { fileName: `${section.title} — ${size}.md`.replace(/[/\\]/g, "-"),
-    text: `# ${section.title}\n\n${size}\n\n${section.group?.summary ?? ""}\n` };
+    text: `# ${section.title}\n\n${size}\n${originalText}`, originalText };
 }

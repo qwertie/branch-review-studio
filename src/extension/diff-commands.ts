@@ -129,8 +129,8 @@ async function openMultiDiff(model: BranchReviewModel, title: string, entries: C
   } else {
     let resources = entries.map(entry => {
       if (entry.kind === "heading") {
-        let uri = getHeadingUri(entry.fileName, entry.section.group?.id);
-        return [uri, undefined, uri];
+        let getUri = (isOriginal: boolean) => getHeadingUri(entry.fileName, entry.section.group?.id, isOriginal);
+        return [getUri(false), getUri(true), getUri(false)];
       }
       let { originalUri, modifiedUri } = getDiffUris(model, entry.change, mergeBase.mergeBaseSha, entry.viewGroupId);
       return [vscode.Uri.file(model.getFullPath(entry.change.path)), originalUri, modifiedUri];

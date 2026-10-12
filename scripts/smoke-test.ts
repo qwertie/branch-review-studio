@@ -793,15 +793,24 @@ async function checkReviewUi(model: Model, exports: BranchReviewStudioExports,
           "could not edit the file in the multi-diff editor");
         await fileEditor.edit(b => b.delete(new vscode.Range(start, start.translate(0, 1))));
         await fileEditor.document.save();
-        let headingText = headings[0]?.document.getText() ?? "";
+        // The heading entry's original side lacks the heading and size lines
+        let [headingText, originalText] = ["", "original"].map(side => headings.find(e => {
+          let query = new URLSearchParams(e.document.uri.query);
+          return query.get("group") === "first" && (query.get("side") ?? "") === side;
+        })?.document.getText() ?? "");
         let firstSize = describeGroupSize(model.snapshot.groupLayout!.groups.find(g => g.id === "first")!);
         assert.ok(headingText.startsWith(`# 1. Smoke: first hunk\n\n${firstSize}\n\nThe **first**`),
           `heading: ${headingText}`);
+        assert.ok(originalText.startsWith("\nThe **first**") && headingText.endsWith(originalText),
+          `original side: ${originalText}`);
         // Makes room so that the screenshot shows the second group
         for (let command of ["workbench.action.closePanel", "workbench.action.closeAuxiliaryBar",
           "workbench.action.zoomOut", "workbench.action.zoomOut"])
           await vscode.commands.executeCommand(command);
         await delay(2000);
+        // Shows whether the multi-diff editor hides unchanged lines of the summaries
+        console.log(`INFO heading editors' visible ranges: ${JSON.stringify(headings.map(e => [e.document.uri.query,
+          e.document.lineCount, e.visibleRanges.map(r => [r.start.line, r.end.line])]))}`);
         screenshot("all-changes-grouped.png");
         await vscode.commands.executeCommand("workbench.action.zoomReset");
       });

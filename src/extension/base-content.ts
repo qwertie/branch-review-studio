@@ -43,12 +43,15 @@ export function getGroupViewUri(repoRoot: string, file: string, groupId: string)
 }
 
 /**
- * Gets the URI of the heading document of a group (undefined `groupId`: Ungrouped). Its path is the
- * document's file name, which the multi-diff editor shows as the entry's title.
+ * Gets the URI of the heading document of a group (undefined `groupId`: Ungrouped), or, if
+ * `isOriginal`, of its original side (see getGroupHeading). Its path is the document's file name,
+ * which the multi-diff editor shows as the entry's title.
  */
-export function getHeadingUri(fileName: string, groupId: string | undefined): vscode.Uri {
-  let query = groupId === undefined ? "" : new URLSearchParams({ group: groupId }).toString();
-  return vscode.Uri.from({ scheme: headingScheme, path: fileName, query });
+export function getHeadingUri(fileName: string, groupId: string | undefined, isOriginal: boolean): vscode.Uri {
+  let query = new URLSearchParams(groupId === undefined ? {} : { group: groupId });
+  if (isOriginal)
+    query.set("side", "original");
+  return vscode.Uri.from({ scheme: headingScheme, path: fileName, query: query.toString() });
 }
 
 /**
@@ -124,9 +127,12 @@ export class HeadingContentProvider extends SnapshotContentProvider {
   }
 
   provideTextDocumentContent(uri: vscode.Uri): string {
-    let groupId = new URLSearchParams(uri.query).get("group") ?? undefined;
+    let query = new URLSearchParams(uri.query);
+    let groupId = query.get("group") ?? undefined;
     let { outline } = this.model.snapshot;
     let section = outline.sections.find(s => s.group && s.group.id === groupId);
-    return section ? getGroupHeading(outline, section).text : "This group is no longer in the review.\n";
+    let heading = section && getGroupHeading(outline, section);
+    return heading ? (query.get("side") === "original" ? heading.originalText : heading.text)
+      : "This group is no longer in the review.\n";
   }
 }

@@ -154,9 +154,13 @@ describe("listChangesEntries", () => {
       // entries
       expect(entries).toEqual(["# 1. Small — +1 line, 1 file.md", "src/b.cs (view of small)",
         "# 2. Big — +7 −2 lines, 2 files.md", "a.cs", "src/b.cs (view of big)", "# Ungrouped — 2 files.md", "c.cs"]);
-      expect(getGroupHeading(outline, outline.sections[1]).text)
-        .toBe("# 2. Big\n\n+7 −2 lines, 2 files\n\nSummary of Big\n");
     });
+
+  it("makes a group's heading document, whose original side lacks the heading and size lines", () => {
+    let outline = createOutline(["src/b.cs", "c.cs", "a.cs"], threads, layout);
+    expect(getGroupHeading(outline, outline.sections[1])).toEqual({ fileName: "2. Big — +7 −2 lines, 2 files.md",
+      text: "# 2. Big\n\n+7 −2 lines, 2 files\n\nSummary of Big\n", originalText: "\nSummary of Big\n" });
+  });
 
   it("lists one group's entries, or files by path without groups or with stale groups", () => {
     let grouped = createOutline(["src/b.cs", "c.cs", "a.cs"], threads, layout);
