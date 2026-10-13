@@ -29,7 +29,7 @@ async function groupFile(baseText: string | undefined, workingText: string, grou
   repo.writeFiles({ "f.txt": workingText });
   let input: ChangeGroupsInput = { groups: groups.map(g => ({ id: g.groupId, name: g.groupId, summary: "" })),
     files: [{ file: "f.txt", groups }] };
-  let { changeGroups, notes } = await createChangeGroups(repo.root, mergeBaseSha,
+  let { changeGroups, notes } = await createChangeGroups(repo.root, { baseRef: "develop", mergeBaseSha },
     await getChangedFiles(repo.root, mergeBaseSha), input);
   return { groupedFile: changeGroups.files[0], notes };
 }

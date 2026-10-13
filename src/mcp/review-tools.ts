@@ -4,7 +4,9 @@ import { createAnchor, locateAnchor } from "../core/anchoring";
 import { claudeIntegration } from "../core/claude-cli";
 import { codexIntegration } from "../core/codex-cli";
 import { getRepoRelativePath, readFileLines } from "../core/files";
-import { findMergeBase, findRepoRoot, getChangedFiles, getCurrentBranch, getGitCommonDir } from "../core/git";
+import {
+  findMergeBase, findRepoRoot, getChangedFiles, getCurrentBranch, getGitCommonDir, MergeBaseInfo,
+} from "../core/git";
 import { arrangeGroups, ChangeGroupsInput, createChangeGroups, describeGroupSize } from "../core/groups";
 import {
   addComment, addThread, createReview, DiffSide, formatCount, getBaseBranchName, getThread, IntegrationId,
@@ -71,7 +73,7 @@ export class ReviewTools {
   /** Creates or updates the branch's review and records the caller as the reviewing session. */
   async beginReview(args: { summary?: string, baseBranch?: string }): Promise<string> {
     let target = await this.findTarget();
-    let review = await this.beginReviewCore(target, args);
+    let { review } = await this.beginReviewCore(target, args);
     let openThreads = review.threads.filter(t => t.status === "open");
     return [
       `Review of branch '${target.branch}' vs ${review.baseBranch} (merge-base ${review.mergeBaseSha}) is ready.`,
@@ -89,7 +91,7 @@ export class ReviewTools {
   /** Adds a thread with one comment on a line range of a file. */
   async addReviewComment(args: NewCommentArgs): Promise<string> {
     let target = await this.findTarget();
-    let review = await target.store.readReview(target.branch) ?? await this.beginReviewCore(target, {});
+    let review = await target.store.readReview(target.branch) ?? (await this.beginReviewCore(target, {})).review;
     let file = getRepoRelativePath(target.repoRoot, path.resolve(target.repoRoot, args.file));
     if (file === undefined)
       throw new Error(`'${args.file}' is not inside the repo ${target.repoRoot}.`);
@@ -146,13 +148,13 @@ export class ReviewTools {
   async setGroups(args: ChangeGroupsInput): Promise<string> {
     let target = await this.findTarget();
     // Updates the merge-base, so that the groups match the merge-base that the extension shows
-    let { mergeBaseSha } = await this.beginReviewCore(target, {});
-    let changedFiles = await getChangedFiles(target.repoRoot, mergeBaseSha);
-    let { changeGroups, notes } = await createChangeGroups(target.repoRoot, mergeBaseSha, changedFiles, args);
+    let { mergeBase } = await this.beginReviewCore(target, {});
+    let changedFiles = await getChangedFiles(target.repoRoot, mergeBase.mergeBaseSha);
+    let { changeGroups, notes } = await createChangeGroups(target.repoRoot, mergeBase, changedFiles, args);
     await this.modifyReview(target, review => {
       review.changeGroups = changeGroups;
     });
-    let layout = arrangeGroups(changeGroups, changedFiles.map(f => f.path), mergeBaseSha);
+    let layout = arrangeGroups(changeGroups, changedFiles.map(f => f.path), mergeBase.mergeBaseSha);
     let groupLines = layout.groups.map(g => `- ${g.name} (${describeGroupSize(g)})`
       + (g.files.length > 0 ? ": " + g.files.map(f => f.path + (f.isPartial ? " (partial)" : "")).join(", ") : ""));
     let result = "Saved the groups. Branch Review Studio shows them smallest first:\n" + groupLines.join("\n");
@@ -173,13 +175,13 @@ export class ReviewTools {
 
   /**
    * Creates the branch's review, or updates its merge-base, and records the caller as the reviewing
-   * session. Existing threads are kept, so that re-running a review converges. Without
-   * `args.baseBranch`, an existing review keeps its base (which the extension's `baseBranch`
-   * setting or Change Base Branch command may have chosen); a new review compares against
-   * 'develop'.
+   * session; returns the saved review and the merge-base that it now has. Existing threads are
+   * kept, so that re-running a review converges. Without `args.baseBranch`, an existing review
+   * keeps its base (which the extension's `baseBranch` setting or Change Base Branch command may
+   * have chosen); a new review compares against 'develop'.
    */
   private async beginReviewCore(target: ReviewTarget, args: { summary?: string, baseBranch?: string })
-    : Promise<Review> {
+    : Promise<{ review: Review, mergeBase: MergeBaseInfo }> {
     let baseBranch = getBaseBranchName(
       args.baseBranch || (await target.store.readReview(target.branch))?.baseBranch || "develop");
     let mergeBase = await findMergeBase(target.repoRoot, baseBranch);
@@ -192,7 +194,7 @@ export class ReviewTools {
       this.recordCaller(review, "review");
       return review;
     });
-    return saved!;
+    return { review: saved!, mergeBase };
   }
 
   private async findTarget(): Promise<ReviewTarget> {

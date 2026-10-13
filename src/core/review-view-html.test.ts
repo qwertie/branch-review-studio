@@ -30,7 +30,7 @@ function createOutline(): ReviewOutline {
 function render(outline = createOutline(), overrides: Partial<ReviewViewData> = {}): string {
   return renderReviewViewBody({ branch: `feature/${evil}`, baseBranch: "develop", outline, summary: `Review ${evil}`,
     mergeBase: { baseRef: "origin/develop", mergeBaseSha: "0123456789abcdef" }, mergeBaseError: undefined,
-    ...overrides });
+    postedGroups: undefined, ...overrides });
 }
 
 describe("renderReviewViewBody", () => {
@@ -60,12 +60,36 @@ describe("renderReviewViewBody", () => {
     expect(html).toMatch(/<button [^>]*data-action="runCommand" data-command="deleteResolvedThreads"/);
   });
 
-  it("shows notices for a missing merge-base, a detached HEAD and stale groups", () => {
+  it("shows notices for a missing merge-base and a detached HEAD, and no stale-groups notice then", () => {
     let outline = { ...createOutline(), isStale: true };
     let html = render(outline, { mergeBase: undefined, mergeBaseError: "no develop", branch: undefined });
     for (let text of ["develop <span class=\"error\">(no merge-base)</span>", "no develop", "HEAD is detached",
-      "post the groups again", "regroup: merge-base changed"])
+      "regroup: merge-base changed"])
       expect(html).toContain(text);
+    expect(html).not.toContain("post the groups again");
+  });
+
+  it("says from which merge-base to which the merge-base with the base ref moved since the groups were posted",
+    () => {
+      for (let baseRef of ["origin/develop", undefined]) {
+        let html = render({ ...createOutline(), isStale: true },
+          { postedGroups: { baseRef, mergeBaseSha: "fedcba9876543210" } });
+        expect(html).toContain(`<div class="notice warning">The merge-base with <code>origin/develop</code> moved `
+          + `from <code title="merge-base fedcba9876543210">fedcba98</code> to `
+          + `<code title="merge-base 0123456789abcdef">01234567</code> since the groups were posted (because this `
+          + "branch was rebased, or merged newer commits of <code>origin/develop</code>, or "
+          + "<code>origin/develop</code> took in commits of this branch), so the diffs show all changes of each "
+          + "file. Ask the agent to post the groups again.</div>");
+      }
+    });
+
+  it("says that the base branch changed since the groups were posted, if it did", () => {
+    let html = render({ ...createOutline(), isStale: true },
+      { postedGroups: { baseRef: `origin/${evil}`, mergeBaseSha: "fedcba9876543210" } });
+    expect(html).toContain(`<div class="notice warning">The base branch changed from `
+      + `<code>origin/&#60;img src=x onerror=&#34;alert(1)&#34;&#62;</code> to <code>origin/develop</code> since the `
+      + "groups were posted, so the diffs show all changes of each file. Ask the agent to post the groups "
+      + "again.</div>");
   });
 });
 

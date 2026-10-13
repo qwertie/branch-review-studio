@@ -1,18 +1,20 @@
 import * as path from "node:path";
-import { ChangedFile } from "./git";
+import { ChangedFile, MergeBaseInfo } from "./git";
 import { describeGroupSize } from "./groups";
 import { escapeHtml, renderMarkdownSubset, stripMarkdown, truncateText } from "./markdown-subset";
 import { isSectionStale, OutlineFile, OutlineSection, OutlineThread, ReviewOutline } from "./review-outline";
-import { formatCount } from "./review";
+import { ChangeGroups, formatCount } from "./review";
 
 /** What the Branch Review view shows (see renderReviewViewBody). */
 export interface ReviewViewData {
   /** Undefined on a detached HEAD */
   branch: string | undefined;
   baseBranch: string;
-  mergeBase: { baseRef: string, mergeBaseSha: string } | undefined;
+  mergeBase: MergeBaseInfo | undefined;
   /** Why `mergeBase` is undefined */
   mergeBaseError: string | undefined;
+  /** The base ref and merge-base with which the review's groups were posted; undefined without groups */
+  postedGroups: Pick<ChangeGroups, "baseRef" | "mergeBaseSha"> | undefined;
   /** The review's overall summary (markdown), if any */
   summary: string | undefined;
   outline: ReviewOutline;
@@ -56,8 +58,8 @@ export function renderReviewViewBody(data: ReviewViewData): string {
     data.mergeBaseError && `<div class="notice error">${escapeHtml(data.mergeBaseError)}</div>`,
     data.branch === undefined && `<div class="notice">HEAD is detached, so comments can't be saved.</div>`,
     data.mergeBase && fileCount === 0 && `<div class="notice">No changes since the merge-base.</div>`,
-    outline.isStale && `<div class="notice warning">The merge-base changed since the groups were posted, so the `
-      + "diffs show all changes of each file. Ask the agent to post the groups again.</div>",
+    outline.isStale && data.mergeBase && data.postedGroups && renderStaleGroupsNotice(data.postedGroups,
+      data.mergeBase),
   ];
   let tree = outline.sections.map(section => section.group ? renderGroup(outline, section)
     : section.files.map(file => renderFile(section, file, 1)).join("")).join("");
@@ -100,8 +102,7 @@ export function getThreadText(thread: OutlineThread): string {
 
 function renderHeader(data: ReviewViewData): string {
   let branch = escapeHtml(data.branch ?? "(detached HEAD)");
-  let base = data.mergeBase ? `${escapeHtml(data.mergeBase.baseRef)} <code title="merge-base ${escapeHtml(
-    data.mergeBase.mergeBaseSha)}">${escapeHtml(data.mergeBase.mergeBaseSha.slice(0, 8))}</code>`
+  let base = data.mergeBase ? `${escapeHtml(data.mergeBase.baseRef)} ${renderSha(data.mergeBase.mergeBaseSha)}`
     : `${escapeHtml(data.baseBranch)} <span class="error">(no merge-base)</span>`;
   let buttons = headerCommands.map(c => `<button class="icon-button codicon codicon-${c.icon}" `
     + `data-action="runCommand" data-command="${c.id}" title="${c.title}" aria-label="${c.title}"></button>`).join("");
@@ -110,6 +111,34 @@ function renderHeader(data: ReviewViewData): string {
     + `<span><b>${branch}</b> <span class="dim">vs</span> ${base}</span></div>
 <div class="toolbar" role="toolbar" aria-label="Branch Review commands">${buttons}
 <label class="filter"><input type="checkbox" id="unresolvedOnly"> Unresolved only</label></div></div>`;
+}
+
+/**
+ * Renders the notice that explains why the groups are stale (see ReviewOutline.isStale): the base
+ * branch changed, or the merge-base with it moved, since they were posted. Since the merge-base
+ * is `git merge-base <baseRef> HEAD`, it moves when HEAD's history changes (rebase, merge) or when
+ * `baseRef` comes to include commits of HEAD (e.g. a fetch brings in a merge of part of the branch).
+ */
+function renderStaleGroupsNotice(posted: Pick<ChangeGroups, "baseRef" | "mergeBaseSha">, current: MergeBaseInfo)
+  : string {
+  let ref = renderCode(current.baseRef);
+  let change = posted.baseRef !== undefined && posted.baseRef !== current.baseRef
+    ? `The base branch changed from ${renderCode(posted.baseRef)} to ${ref} since the groups were posted`
+    : `The merge-base with ${ref} moved from ${renderSha(posted.mergeBaseSha)} to ${renderSha(current.mergeBaseSha)} `
+      + `since the groups were posted (because this branch was rebased, or merged newer commits of ${ref}, or ${ref} `
+      + "took in commits of this branch)";
+  return `<div class="notice warning">${change}, so the diffs show all changes of each file. Ask the agent to `
+    + "post the groups again.</div>";
+}
+
+/** Renders a merge-base commit as its short SHA, with the full SHA as its tooltip. */
+function renderSha(sha: string): string {
+  return `<code title="merge-base ${escapeHtml(sha)}">${escapeHtml(sha.slice(0, 8))}</code>`;
+}
+
+/** Renders text, such as a ref name, HTML-escaped in a code span. */
+function renderCode(text: string): string {
+  return `<code>${escapeHtml(text)}</code>`;
 }
 
 /**

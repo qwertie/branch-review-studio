@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { getRepoRelativePath } from "./files";
-import { ChangedFile, comparePaths } from "./git";
+import { ChangedFile, comparePaths, MergeBaseInfo } from "./git";
 import { applyHunks, DiffHunk, readDiffHunks } from "./hunks";
 import { ChangeGroup, ChangeGroups, formatCount, GroupedFile, GroupedHunk } from "./review";
 
@@ -69,8 +69,9 @@ const ungroupedName = "Ungrouped";
  * assigns them to groups (see assignHunksToGroups). Throws an error listing every problem. Returns
  * the groups plus notes for the agent about hunks and ranges that matched nothing.
  */
-export async function createChangeGroups(repoRoot: string, mergeBaseSha: string, changedFiles: ChangedFile[],
+export async function createChangeGroups(repoRoot: string, mergeBase: MergeBaseInfo, changedFiles: ChangedFile[],
   input: ChangeGroupsInput): Promise<{ changeGroups: ChangeGroups, notes: string[] }> {
+  let { baseRef, mergeBaseSha } = mergeBase;
   let problems: string[] = [];
   let groupIds = input.groups.map(g => g.id);
   for (let [i, group] of input.groups.entries()) {
@@ -122,7 +123,7 @@ export async function createChangeGroups(repoRoot: string, mergeBaseSha: string,
   if (ungroupedFiles.length > 0)
     notes.push("These changed files are in no group, so Branch Review Studio lists them under Ungrouped: "
       + ungroupedFiles.join(", "));
-  let changeGroups = { mergeBaseSha, createdAt: new Date().toISOString(), groups: input.groups, files };
+  let changeGroups = { mergeBaseSha, baseRef, createdAt: new Date().toISOString(), groups: input.groups, files };
   return { changeGroups, notes };
 }
 

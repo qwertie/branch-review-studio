@@ -63,8 +63,10 @@ export class ReviewViewProvider implements vscode.WebviewViewProvider, vscode.Di
 
   private renderBody(): string {
     let { model } = this;
+    let review = model?.snapshot.review;
     return model ? renderReviewViewBody({ ...model.snapshot, baseBranch: model.baseBranch,
-      summary: model.snapshot.review?.summary }) : `<p class="notice">No workspace folder is in a git repo.</p>`;
+      summary: review?.summary, postedGroups: review?.changeGroups })
+      : `<p class="notice">No workspace folder is in a git repo.</p>`;
   }
 
   private renderPage(webview: vscode.Webview, mediaUri: vscode.Uri): string {

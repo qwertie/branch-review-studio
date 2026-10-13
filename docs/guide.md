@@ -309,9 +309,13 @@ A review can divide the branch's changes into groups of related changes, e.g. "F
   diff (the diff button on the file's row, or **Open All Changes** without groups). A thread opens
   in a single-file diff even when Open All Changes is open, since VS Code offers extensions no
   reliable way to scroll its multi-diff editor to a line.
-- **Stale groups:** if the merge-base changes (e.g. after **Fetch Base Branch** or **Change Base
-  Branch…**), the frozen hunks no longer apply, so the diffs show whole files and the group rows
-  say "regroup: merge-base changed"; ask the agent to post the groups again.
+- **Stale groups:** the frozen hunks refer to the merge-base (`git merge-base origin/<base> HEAD`)
+  at the time the groups were posted. The merge-base moves when the branch is rebased or merges
+  newer commits of the base branch, or when `origin/<base>` takes in commits of the branch (e.g.
+  **Fetch Base Branch** after part of the branch was merged); **Change Base Branch…** changes it
+  too. Then the frozen hunks no longer apply, so the diffs show whole files, the group rows say
+  "regroup: merge-base changed", and a notice says which commit the merge-base moved from and to
+  (or which base branch replaced which); ask the agent to post the groups again.
 
 ## Branch Review Studio panel
 

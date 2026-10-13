@@ -149,7 +149,7 @@ describe("ReviewTools", () => {
         files: [{ file: "src/b.ts", hunks: [{ newCount: 3, groupIds: ["b"] }] }] });
     });
 
-  it("setGroups freezes the hunks against the current merge-base and saves it in the review", async () => {
+  it("setGroups freezes the hunks against the current merge-base and saves it and its base ref", async () => {
     let repo = createFeatureRepo();
     let tools = createTools(repo);
     await tools.beginReview({});
@@ -163,7 +163,7 @@ describe("ReviewTools", () => {
 
     let review = await readReview(repo);
     expect(review.mergeBaseSha).toBe(repo.git("rev-parse", "HEAD"));
-    expect(review.changeGroups?.mergeBaseSha).toBe(review.mergeBaseSha);
+    expect(review.changeGroups).toMatchObject({ mergeBaseSha: review.mergeBaseSha, baseRef: "develop" });
   });
 
   it("setGroups tells the agent about changed files that it put in no group", async () => {

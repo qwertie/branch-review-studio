@@ -39,6 +39,11 @@ export interface Review {
 export interface ChangeGroups {
   /** Merge-base when the groups were posted; `GroupedHunk.oldStart` refers to it */
   mergeBaseSha: string;
+  /**
+   * The ref whose merge-base with HEAD `mergeBaseSha` was, e.g. `origin/develop` (see
+   * MergeBaseInfo); undefined in groups posted by version 1.1.0 or earlier
+   */
+  baseRef?: string;
   /** ISO timestamp */
   createdAt: string;
   /** In the agent's order */
