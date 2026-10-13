@@ -2,6 +2,7 @@ import { AnchorLocation } from "./anchoring";
 import { ChangedFile, comparePaths } from "./git";
 import { ArrangedGroup, describeGroupSize, GroupLayout } from "./groups";
 import { DiffHunk, mapBaseLineToWorkingTree } from "./hunks";
+import { reflowMarkdown } from "./markdown-subset";
 import { Review, ReviewThread } from "./review";
 
 /** What buildReviewOutline needs from the extension's ReviewSnapshot. */
@@ -221,12 +222,14 @@ export function listChangesEntries(outline: ReviewOutline, sections = outline.se
  * +12 −3 lines, 3 files.md" (the multi-diff editor labels each entry with its document's file
  * name); its markdown `text` (heading, size and summary); and `originalText`, which lacks the
  * heading and size lines. The multi-diff editor shows a diff from `originalText` to `text`, so
- * that only the heading and size lines are marked as added (green).
+ * that only the heading and size lines are marked as added (green). The summary is reflowed (see
+ * reflowMarkdown) because the multi-diff editor folds unchanged lines and VS Code word-wraps
+ * markdown, so fewer, longer lines leave less of the summary folded.
  */
 export function getGroupHeading(outline: ReviewOutline, section: OutlineSection)
   : { fileName: string, text: string, originalText: string } {
   let size = describeSection(outline, section);
-  let originalText = `\n${section.group?.summary ?? ""}\n`;
+  let originalText = `\n${reflowMarkdown(section.group?.summary ?? "")}\n`;
   return { fileName: `${section.title} — ${size}.md`.replace(/[/\\]/g, "-"),
     text: `# ${section.title}\n\n${size}\n${originalText}`, originalText };
 }

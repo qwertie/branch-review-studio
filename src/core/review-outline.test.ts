@@ -162,6 +162,13 @@ describe("listChangesEntries", () => {
       text: "# 2. Big\n\n+7 −2 lines, 2 files\n\nSummary of Big\n", originalText: "\nSummary of Big\n" });
   });
 
+  it("reflows the summary in a group's heading document, so that VS Code word-wraps it", () => {
+    let wrapped = { ...layout.groups[1], summary: "A summary\nwrapped at\n72 columns.\n\n- An item\n  wrapped" };
+    let outline = createOutline(["src/b.cs", "c.cs", "a.cs"], threads, { ...layout, groups: [wrapped] });
+    expect(getGroupHeading(outline, outline.sections[0]).originalText)
+      .toBe("\nA summary wrapped at 72 columns.\n\n- An item wrapped\n");
+  });
+
   it("lists one group's entries, or files by path without groups or with stale groups", () => {
     let grouped = createOutline(["src/b.cs", "c.cs", "a.cs"], threads, layout);
     expect(listChangesEntries(grouped, [grouped.sections[1]])

@@ -13,6 +13,50 @@ export function renderMarkdownSubset(markdown: string): string {
 }
 
 /**
+ * Joins the wrapped lines of each paragraph and list item of markdown into one line, as
+ * renderMarkdownSubset does, so that an editor that word-wraps shows the text in fewer lines. List
+ * items and headings start new lines; paragraphs and items keep their first line's indentation
+ * (and marker); hard breaks and blank lines are kept; fenced code blocks are unchanged. Used for
+ * Open All Changes' group headings.
+ */
+export function reflowMarkdown(markdown: string): string {
+  let output: string[] = [];
+  let block: string[] = [];
+  /** The opening fence (e.g. "```") of the code block that the current line is in */
+  let fence: string | undefined;
+  for (let line of markdown.replace(/\r\n?/g, "\n").split("\n")) {
+    let fenceLine = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence !== undefined) {
+      output.push(line);
+      if (fenceLine?.startsWith(fence) && line.trim() === fenceLine)
+        fence = undefined;
+    } else if (fenceLine || line.trim() === "") {
+      flushBlock();
+      output.push(line);
+      fence = fenceLine;
+    } else {
+      block.push(line);
+    }
+  }
+  flushBlock();
+  return output.join("\n");
+
+  function flushBlock() {
+    for (let part of parseBlock(block)) {
+      if (part.kind === "heading") {
+        output.push(part.line);
+      } else {
+        // Lines after a hard break are indented to the first line's text, so they stay in the item
+        let prefix = part.kind === "item" ? part.prefix : /^\s*/.exec(part.lines[0])?.[0] ?? "";
+        output.push(...joinWrappedLines(part.lines).map((s, i) =>
+          (i === 0 ? prefix : " ".repeat(prefix.length)) + s.text + (s.breakMarker ?? "")));
+      }
+    }
+    block = [];
+  }
+}
+
+/**
  * Converts markdown to one line of plain text, e.g. "**Major:** see `Foo`" to "Major: see Foo", for
  * labels that show the start of a message.
  */
@@ -48,58 +92,88 @@ const headingPattern = /^\s*#{1,6}\s+(.*)$/;
 
 /**
  * Renders a block of escaped markdown (text between blank lines): runs of list items become lists,
- * headings become bold paragraphs, and other runs of lines become paragraphs. A line that is not
- * an item or heading continues the list item above it, if any (e.g. a wrapped bullet).
+ * headings become bold paragraphs, and other text becomes paragraphs (see parseBlock).
  */
 function renderBlock(block: string): string {
   let html = "";
-  let paragraph: string[] = [];
-  /** Each item is a list of lines */
-  let list: { tag: "ul" | "ol", items: string[][] } | undefined;
-  for (let line of block.split("\n").filter(l => l.trim() !== "")) {
-    let item = listItemPattern.exec(line);
-    let heading = headingPattern.exec(line);
-    let tag: "ol" | "ul" | undefined = item ? (/\d/.test(item[1]) ? "ol" : "ul") : undefined;
-    if (item || heading) {
-      flushParagraph();
-      if (tag !== list?.tag)
-        flushList();
-    }
-    if (item && tag) {
-      list ??= { tag, items: [] };
-      list.items.push([item[2]]);
-    } else if (heading) {
-      html += `<p><strong>${renderInline(heading[1])}</strong></p>`;
+  /** Each item is rendered HTML */
+  let list: { tag: "ul" | "ol", items: string[] } | undefined;
+  for (let part of parseBlock(block.split("\n"))) {
+    if (part.kind !== "item" || part.tag !== list?.tag)
+      flushList();
+    if (part.kind === "item") {
+      list ??= { tag: part.tag, items: [] };
+      list.items.push(`<li>${renderLines(part.lines)}</li>`);
     } else {
-      (list?.items.at(-1) ?? paragraph).push(line);
+      html += part.kind === "heading" ? `<p><strong>${renderInline(part.text)}</strong></p>`
+        : `<p>${renderLines(part.lines)}</p>`;
     }
   }
   flushList();
-  flushParagraph();
   return html;
-
-  function flushParagraph() {
-    if (paragraph.length > 0)
-      html += `<p>${renderLines(paragraph)}</p>`;
-    paragraph = [];
-  }
 
   function flushList() {
     if (list)
-      html += `<${list.tag}>${list.items.map(i => `<li>${renderLines(i)}</li>`).join("")}</${list.tag}>`;
+      html += `<${list.tag}>${list.items.join("")}</${list.tag}>`;
     list = undefined;
   }
 }
 
+/** A paragraph, list item or heading of a block of markdown (see parseBlock). */
+type BlockPart =
+  | { kind: "paragraph", lines: string[] }
+  /** `prefix` is the item's first line up to its text, e.g. "  1. " */
+  | { kind: "item", tag: "ul" | "ol", prefix: string, lines: string[] }
+  /** `text` is `line` without the `#` marks */
+  | { kind: "heading", line: string, text: string };
+
 /**
- * Renders the lines of a paragraph or list item (escaped markdown) as HTML, joining them with
- * spaces, or with a line break after a line that ends with two or more spaces or a backslash.
+ * Divides a block of markdown (lines between blank lines) into paragraphs, list items and
+ * headings, for renderBlock and reflowMarkdown. A line that is not an item or heading continues
+ * the list item or paragraph above it, if any (e.g. a wrapped bullet).
  */
+function parseBlock(lines: string[]): BlockPart[] {
+  let parts: BlockPart[] = [];
+  for (let line of lines.filter(l => l.trim() !== "")) {
+    let item = listItemPattern.exec(line);
+    let heading = headingPattern.exec(line);
+    let previous = parts.at(-1);
+    if (item) {
+      parts.push({ kind: "item", tag: /\d/.test(item[1]) ? "ol" : "ul",
+        prefix: line.slice(0, line.length - item[2].length), lines: [item[2]] });
+    } else if (heading) {
+      parts.push({ kind: "heading", line, text: heading[1] });
+    } else if (previous && previous.kind !== "heading") {
+      previous.lines.push(line);
+    } else {
+      parts.push({ kind: "paragraph", lines: [line] });
+    }
+  }
+  return parts;
+}
+
+/** Renders the lines of a paragraph or list item (escaped markdown) as HTML (see joinWrappedLines). */
 function renderLines(lines: string[]): string {
-  return renderInline(lines.map((line, i) => {
+  return renderInline(joinWrappedLines(lines).map(s => s.text + (s.breakMarker ? "<br>" : "")).join(""));
+}
+
+/**
+ * Joins the lines of a paragraph or list item with spaces, as CommonMark does, except after a line
+ * that ends with a hard break (two or more spaces or a backslash). Returns the joined segments,
+ * each with the hard break that ends it (removed from `text`; undefined for the last segment).
+ */
+function joinWrappedLines(lines: string[]): { text: string, breakMarker: string | undefined }[] {
+  let segments: { text: string, breakMarker: string | undefined }[] = [];
+  let segmentLines: string[] = [];
+  for (let [i, line] of lines.entries()) {
     let breakMarker = i < lines.length - 1 ? /(?: {2,}|\\)$/.exec(line)?.[0] : undefined;
-    return (breakMarker === "\\" ? line.slice(0, -1) : line).trim() + (breakMarker ? "<br>" : " ");
-  }).join("").trimEnd());
+    segmentLines.push((breakMarker === "\\" ? line.slice(0, -1) : line).trim());
+    if (breakMarker || i === lines.length - 1) {
+      segments.push({ text: segmentLines.join(" "), breakMarker });
+      segmentLines = [];
+    }
+  }
+  return segments;
 }
 
 /** Renders the inline markup of escaped markdown: code spans, emphasis, links/images as text. */

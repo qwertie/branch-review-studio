@@ -293,8 +293,9 @@ A review can divide the branch's changes into groups of related changes, e.g. "F
   the agent about changed files it put in no group. Without groups, the view lists the files by
   path. Thread navigation visits the threads of a file that is in several groups under the first.
 - **Open All Changes** shows, for each group in the view's order, a heading entry (a read-only
-  markdown document named like "1. Name — +12 −3 lines, 3 files.md" that holds the summary; only
-  its heading and size lines are marked as added), then the group's files, each showing that
+  markdown document named like "1. Name — +12 −3 lines, 3 files.md" that holds the summary, with
+  each paragraph and list item on one line so that it word-wraps; only its heading and size lines
+  are marked as added), then the group's files, each showing that
   group's view of the file. A file in several groups appears once per group. Ungrouped files come
   last, under an "Ungrouped" heading. (VS Code's multi-diff editor shows nothing if two entries
   have the same left and right documents, so a file's later appearances always use the group's

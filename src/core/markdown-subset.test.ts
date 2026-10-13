@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderMarkdownSubset, stripMarkdown, truncateText } from "./markdown-subset";
+import { reflowMarkdown, renderMarkdownSubset, stripMarkdown, truncateText } from "./markdown-subset";
 
 describe("renderMarkdownSubset", () => {
   it("renders bold, italic, code, paragraphs and lists", () => {
@@ -55,6 +55,27 @@ describe("renderMarkdownSubset", () => {
   it("escapes HTML inside backticks and ignores NUL characters (used internally as placeholders)", () => {
     expect(renderMarkdownSubset("`<img src=x onerror=alert(1)>` \u00000\u0000"))
       .toBe("<p><code>&#60;img src=x onerror=alert(1)&#62;</code> 0</p>");
+  });
+});
+
+describe("reflowMarkdown", () => {
+  it("joins wrapped lines, keeping list items, headings, hard breaks and blank lines", () => {
+    expect(reflowMarkdown("Group summaries are copied\r\n  from commit messages.\r\n\r\n\r\n## Changes\n"
+      + "- Wrapped bullet of a\n  commit message\n  1. nested item\n     wrapped\nlazy line\n\n"
+      + "one  \ntwo\\\nthree\nfour"))
+      .toBe("Group summaries are copied from commit messages.\n\n\n## Changes\n- Wrapped bullet of a commit message\n"
+        + "  1. nested item wrapped lazy line\n\none  \ntwo\\\nthree four");
+  });
+
+  it("keeps the indentation of paragraphs and of list items' lines after hard breaks", () => {
+    expect(reflowMarkdown("- one  \n  two\n  three\n\n  Item's second\n  paragraph\n\n  1. a\\\n     b"))
+      .toBe("- one  \n  two three\n\n  Item's second paragraph\n\n  1. a\\\n     b");
+  });
+
+  it("leaves fenced code blocks untouched", () => {
+    let fenced = "```ts\nlet x =\n  1;\n\n\nreturn x;\n```";
+    expect(reflowMarkdown(`Before\nit.\n${fenced}\nAfter\nit.\n~~~\nraw\n  text\n~~~`))
+      .toBe(`Before it.\n${fenced}\nAfter it.\n~~~\nraw\n  text\n~~~`);
   });
 });
 
