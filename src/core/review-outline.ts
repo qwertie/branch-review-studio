@@ -1,9 +1,9 @@
 import { AnchorLocation } from "./anchoring";
-import { ChangedFile, comparePaths } from "./git";
+import { ChangedFile, comparePaths, MergeBaseInfo } from "./git";
 import { ArrangedGroup, describeGroupSize, GroupLayout } from "./groups";
 import { DiffHunk, mapBaseLineToWorkingTree } from "./hunks";
 import { reflowMarkdown } from "./markdown-subset";
-import { Review, ReviewThread } from "./review";
+import { ChangeGroups, Review, ReviewThread } from "./review";
 
 /** What buildReviewOutline needs from the extension's ReviewSnapshot. */
 export interface OutlineInput {
@@ -92,6 +92,23 @@ export type ChangesEntry =
   | { kind: "heading", section: OutlineSection, fileName: string }
   /** A file's diff, or, if viewGroupId is set, that group's view of it (see buildGroupViewText) */
   | { kind: "file", change: ChangedFile, viewGroupId: string | undefined };
+
+/**
+ * The base ref and merge-base with which a review's groups were posted, and the current ones,
+ * which differ if the groups are stale (see ReviewOutline.isStale).
+ */
+export interface GroupsBaseMove {
+  posted: Pick<ChangeGroups, "baseRef" | "mergeBaseSha">;
+  current: Pick<MergeBaseInfo, "baseRef" | "mergeBaseSha">;
+}
+
+/** Formats code spans in HTML or markdown, for describeGroupsBaseMove. */
+export interface CodeFormat {
+  /** Formats a ref name */
+  formatCode(text: string): string;
+  /** Formats a commit, given its full SHA */
+  formatSha(sha: string): string;
+}
 
 /**
  * Arranges the changed files, the unchanged files that have threads, and the threads into a
@@ -193,14 +210,15 @@ export function findAdjacentThread(outline: ReviewOutline, from: ThreadPosition 
 
 /**
  * Lists the entries of a multi-diff editor that shows the given sections (by default, all of them).
- * If the review has groups that aren't stale, each group starts with a heading document, then its
- * changed files, each showing the group's view of the file if it is partial. A file in several
- * groups appears under each; since VS Code's multi-diff editor fails (shows nothing) if two
- * entries have the same original and modified documents, a file's later appearances use the
- * group's view even if it isn't partial. Otherwise, the entries are the changed files by path.
+ * If the review has groups, each group starts with a heading document, then its changed files,
+ * each showing the group's view of the file if it is partial. Since VS Code's multi-diff editor
+ * fails (shows nothing) if two entries have the same original and modified documents, a file in
+ * several groups appears under each with the group's view after its first appearance, even if it
+ * isn't partial; or, if the groups are stale (so there are no views), only under the first. In a
+ * review without groups, the entries are the changed files by path.
  */
 export function listChangesEntries(outline: ReviewOutline, sections = outline.sections): ChangesEntry[] {
-  if (outline.isStale || sections.some(s => s.group === undefined)) {
+  if (sections.some(s => s.group === undefined)) {
     let changes = new Map(sections.flatMap(s => s.files.flatMap(f => f.change ? [[f.path, f.change]] : [])));
     return [...changes.values()].sort(comparePaths).map(change => ({ kind: "file", change, viewGroupId: undefined }));
   }
@@ -210,7 +228,7 @@ export function listChangesEntries(outline: ReviewOutline, sections = outline.se
     let files = section.files.flatMap(file => {
       let isShown = shownPaths.has(file.path);
       shownPaths.add(file.path);
-      return file.change ? [{ kind: "file" as const, change: file.change,
+      return file.change && !(isShown && outline.isStale) ? [{ kind: "file" as const, change: file.change,
         viewGroupId: isShown ? section.group?.id : getViewGroupId(section, file) }] : [];
     });
     return [heading, ...files];
@@ -220,16 +238,54 @@ export function listChangesEntries(outline: ReviewOutline, sections = outline.se
 /**
  * Gets the document that introduces a group in Open All Changes: its file name, e.g. "1. Name —
  * +12 −3 lines, 3 files.md" (the multi-diff editor labels each entry with its document's file
- * name); its markdown `text` (heading, size and summary); and `originalText`, which lacks the
- * heading and size lines. The multi-diff editor shows a diff from `originalText` to `text`, so
- * that only the heading and size lines are marked as added (green). The summary is reflowed (see
+ * name); its markdown `text` (heading, size, a note if the group is stale and `move` is given, and
+ * summary); and `originalText`, which has only the summary. The multi-diff editor shows a diff
+ * from `originalText` to `text`, so that only the lines above the summary are marked as added
+ * (green), which also keeps the editor from folding them away. The summary is reflowed (see
  * reflowMarkdown) because the multi-diff editor folds unchanged lines and VS Code word-wraps
  * markdown, so fewer, longer lines leave less of the summary folded.
  */
-export function getGroupHeading(outline: ReviewOutline, section: OutlineSection)
+export function getGroupHeading(outline: ReviewOutline, section: OutlineSection, move?: GroupsBaseMove)
   : { fileName: string, text: string, originalText: string } {
   let size = describeSection(outline, section);
   let originalText = `\n${reflowMarkdown(section.group?.summary ?? "")}\n`;
+  let note = "";
+  if (move && isSectionStale(outline, section)) {
+    let firstGroupNote = hasFileOfEarlierSection(outline, section)
+      ? " In Open All Changes, a file that is also in an earlier group is listed only there." : "";
+    note = `\n> **Regroup needed:** ${describeGroupsBaseMove(move, markdownCodeFormat, false)}, so the diffs below `
+      + "show whole files, including changes that belong to other groups. Ask the agent to post the groups again."
+      + `${firstGroupNote}\n`;
+  }
   return { fileName: `${section.title} — ${size}.md`.replace(/[/\\]/g, "-"),
-    text: `# ${section.title}\n\n${size}\n${originalText}`, originalText };
+    text: `# ${section.title}\n\n${size}\n${note}${originalText}`, originalText };
+}
+
+/**
+ * Describes how the base of a review's groups moved since they were posted, e.g. "the merge-base
+ * with `origin/develop` moved from `5c110abc` to `f6900332` since the groups were posted", or "the
+ * base branch changed from ... to ...". With `isCauseIncluded`, a moved merge-base is followed by
+ * its possible causes: since the merge-base is `git merge-base <baseRef> HEAD`, it moves when
+ * HEAD's history changes (rebase, merge) or when `baseRef` comes to include commits of HEAD (e.g. a
+ * fetch brings in a merge of part of the branch).
+ */
+export function describeGroupsBaseMove({ posted, current }: GroupsBaseMove, format: CodeFormat,
+  isCauseIncluded: boolean): string {
+  let ref = format.formatCode(current.baseRef);
+  return posted.baseRef !== undefined && posted.baseRef !== current.baseRef
+    ? `the base branch changed from ${format.formatCode(posted.baseRef)} to ${ref} since the groups were posted`
+    : `the merge-base with ${ref} moved from ${format.formatSha(posted.mergeBaseSha)} to `
+      + `${format.formatSha(current.mergeBaseSha)} since the groups were posted` + (isCauseIncluded ? ` (because `
+      + `this branch was rebased, or merged newer commits of ${ref}, or ${ref} took in commits of this branch)` : "");
+}
+
+/** Formats code spans in markdown, for the group heading documents (see getGroupHeading). */
+const markdownCodeFormat: CodeFormat = { formatCode: text => `\`${text}\``,
+  formatSha: sha => `\`${sha.slice(0, 8)}\`` };
+
+/** Checks whether a section has a changed file that an earlier section also has. */
+function hasFileOfEarlierSection(outline: ReviewOutline, section: OutlineSection): boolean {
+  let earlierPaths = new Set(outline.sections.slice(0, outline.sections.indexOf(section))
+    .flatMap(s => s.files.map(f => f.path)));
+  return section.files.some(f => f.change && earlierPaths.has(f.path));
 }

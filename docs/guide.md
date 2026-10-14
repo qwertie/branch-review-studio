@@ -313,8 +313,9 @@ A review can divide the branch's changes into groups of related changes, e.g. "F
   group's view of the file. A file in several groups appears once per group. Ungrouped files come
   last, under an "Ungrouped" heading. (VS Code's multi-diff editor shows nothing if two entries
   have the same left and right documents, so a file's later appearances always use the group's
-  view, whose left side differs per group.) With stale groups (see below), it lists the changed
-  files by path.
+  view, whose left side differs per group.) With stale groups (see below), there are no group
+  views, so the files show whole-file diffs and a file in several groups appears only under the
+  first; each group's heading entry then starts with a "Regroup needed" note that says why.
 - **Diffs:** clicking a group's heading opens its heading entry and files in a multi-diff editor
   titled with the group's heading; clicking a file under a group opens that group's view of the
   file. In a group's view, the left

@@ -2,7 +2,9 @@ import * as path from "node:path";
 import { ChangedFile, MergeBaseInfo } from "./git";
 import { describeGroupSize } from "./groups";
 import { escapeHtml, renderMarkdownSubset, stripMarkdown, truncateText } from "./markdown-subset";
-import { isSectionStale, OutlineFile, OutlineSection, OutlineThread, ReviewOutline } from "./review-outline";
+import {
+  describeGroupsBaseMove, isSectionStale, OutlineFile, OutlineSection, OutlineThread, ReviewOutline,
+} from "./review-outline";
 import { ChangeGroups, formatCount } from "./review";
 
 /** What the Branch Review view shows (see renderReviewViewBody). */
@@ -131,20 +133,14 @@ function renderHeader(data: ReviewViewData): string {
 
 /**
  * Renders the notice that explains why the groups are stale (see ReviewOutline.isStale): the base
- * branch changed, or the merge-base with it moved, since they were posted. Since the merge-base
- * is `git merge-base <baseRef> HEAD`, it moves when HEAD's history changes (rebase, merge) or when
- * `baseRef` comes to include commits of HEAD (e.g. a fetch brings in a merge of part of the branch).
+ * branch changed, or the merge-base with it moved, since they were posted (see
+ * describeGroupsBaseMove).
  */
 function renderStaleGroupsNotice(posted: Pick<ChangeGroups, "baseRef" | "mergeBaseSha">, current: MergeBaseInfo)
   : string {
-  let ref = renderCode(current.baseRef);
-  let change = posted.baseRef !== undefined && posted.baseRef !== current.baseRef
-    ? `The base branch changed from ${renderCode(posted.baseRef)} to ${ref} since the groups were posted`
-    : `The merge-base with ${ref} moved from ${renderSha(posted.mergeBaseSha)} to ${renderSha(current.mergeBaseSha)} `
-      + `since the groups were posted (because this branch was rebased, or merged newer commits of ${ref}, or ${ref} `
-      + "took in commits of this branch)";
-  return `<div class="notice warning">${change}, so the diffs show all changes of each file. Ask the agent to `
-    + "post the groups again.</div>";
+  let move = describeGroupsBaseMove({ posted, current }, { formatCode: renderCode, formatSha: renderSha }, true);
+  return `<div class="notice warning">${move[0].toUpperCase()}${move.slice(1)}, so the diffs show all changes of each `
+    + "file. Ask the agent to post the groups again.</div>";
 }
 
 /**

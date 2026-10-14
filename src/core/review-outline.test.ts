@@ -5,8 +5,8 @@ import { ArrangedGroup, GroupLayout } from "./groups";
 import { DiffHunk } from "./hunks";
 import { createReview, ReviewThread, ThreadStatus } from "./review";
 import {
-  buildReviewOutline, findAdjacentThread, getGroupHeading, getWorkingTreeLine, listChangesEntries, listThreadVisits,
-  ReviewOutline, ThreadPosition,
+  buildReviewOutline, ChangesEntry, findAdjacentThread, getGroupHeading, getWorkingTreeLine, listChangesEntries,
+  listThreadVisits, ReviewOutline, ThreadPosition,
 } from "./review-outline";
 
 /**
@@ -48,6 +48,16 @@ const threads = [thread("b1", "src/b.cs", 20), thread("b2", "src/b.cs", 50, 10),
 const layout: GroupLayout = { isStale: false, groups: [group("small", "Small", [["src/b.cs", true]]),
   group("big", "Big", [["a.cs"], ["src/b.cs", false]], [7, 2]), group(undefined, "Ungrouped", [["c.cs"],
     ["unchanged.cs"]])] };
+
+/** `layout` after the merge-base moved, so that no file is partial (see GroupLayout.isStale) */
+const staleLayout: GroupLayout = { isStale: true,
+  groups: layout.groups.map(g => ({ ...g, files: g.files.map(f => ({ ...f, isPartial: false })) })) };
+
+/** Describes a ChangesEntry as "# file name" (heading) or the file's path, with the view's group if any. */
+function describeEntry(entry: ChangesEntry): string {
+  return entry.kind === "heading" ? `# ${entry.fileName}`
+    : `${entry.change.path}${entry.viewGroupId ? ` (view of ${entry.viewGroupId})` : ""}`;
+}
 
 function getIds(outline: ReviewOutline): string[] {
   return listThreadVisits(outline).map(v => v.thread.thread.id);
@@ -148,8 +158,7 @@ describe("listChangesEntries", () => {
   it("lists a heading per group, then the group's changed files by path, a file once per group, Ungrouped last",
     () => {
       let outline = createOutline(["src/b.cs", "c.cs", "a.cs"], threads, layout);
-      let entries = listChangesEntries(outline).map(e => e.kind === "heading" ? `# ${e.fileName}`
-        : `${e.change.path}${e.viewGroupId ? ` (view of ${e.viewGroupId})` : ""}`);
+      let entries = listChangesEntries(outline).map(describeEntry);
       // src/b.cs isn't partial in "big", but it was already shown, and VS Code fails on duplicate
       // entries
       expect(entries).toEqual(["# 1. Small — +1 line, 1 file.md", "src/b.cs (view of small)",
@@ -169,16 +178,45 @@ describe("listChangesEntries", () => {
       .toBe("\nA summary wrapped at 72 columns.\n\n- An item wrapped\n");
   });
 
-  it("lists one group's entries, or files by path without groups or with stale groups", () => {
+  it("lists one group's entries, or files by path without groups", () => {
     let grouped = createOutline(["src/b.cs", "c.cs", "a.cs"], threads, layout);
     expect(listChangesEntries(grouped, [grouped.sections[1]])
       .map(e => e.kind === "file" ? e.viewGroupId ?? e.change.path : e.fileName))
       .toEqual(["2. Big — +7 −2 lines, 2 files.md", "a.cs", "src/b.cs"]);
-    for (let outline of [createOutline(["src/b.cs", "c.cs", "a.cs"], threads),
-      createOutline(["src/b.cs", "c.cs", "a.cs"], threads, { ...layout, isStale: true })]) {
-      expect(listChangesEntries(outline).map(e => e.kind === "file" && !e.viewGroupId && e.change.path))
-        .toEqual(["a.cs", "c.cs", "src/b.cs"]);
-    }
+    expect(listChangesEntries(createOutline(["src/b.cs", "c.cs", "a.cs"], threads))
+      .map(e => e.kind === "file" && !e.viewGroupId && e.change.path)).toEqual(["a.cs", "c.cs", "src/b.cs"]);
+  });
+
+  it("with stale groups, keeps the headings and lists whole files, a file only under its first group", () => {
+    let outline = createOutline(["src/b.cs", "c.cs", "a.cs"], threads, staleLayout);
+    expect(listChangesEntries(outline).map(describeEntry)).toEqual([
+      "# 1. Small — +1 line, 1 file · regroup: merge-base changed.md", "src/b.cs",
+      "# 2. Big — +7 −2 lines, 2 files · regroup: merge-base changed.md", "a.cs",
+      "# Ungrouped — 2 files.md", "c.cs"]);
+    // A group's own editor lists all of its files
+    expect(listChangesEntries(outline, [outline.sections[1]]).map(describeEntry))
+      .toEqual(["# 2. Big — +7 −2 lines, 2 files · regroup: merge-base changed.md", "a.cs", "src/b.cs"]);
+  });
+
+  it("with stale groups, a heading document says why, in its added lines", () => {
+    let outline = createOutline(["src/b.cs", "c.cs", "a.cs"], threads, staleLayout);
+    let posted = { baseRef: "origin/develop", mergeBaseSha: "5c110abcd10e33f7" };
+    let current = { baseRef: "origin/develop", mergeBaseSha: "f6900332aaaabbbb" };
+    let note = "> **Regroup needed:** the merge-base with `origin/develop` moved from `5c110abc` to `f6900332` since "
+      + "the groups were posted, so the diffs below show whole files, including changes that belong to other groups. "
+      + "Ask the agent to post the groups again.";
+    let earlier = " In Open All Changes, a file that is also in an earlier group is listed only there.";
+    expect(getGroupHeading(outline, outline.sections[0], { posted, current })).toEqual({
+      fileName: "1. Small — +1 line, 1 file · regroup: merge-base changed.md",
+      text: `# 1. Small\n\n+1 line, 1 file · regroup: merge-base changed\n\n${note}\n\nSummary of Small\n`,
+      originalText: "\nSummary of Small\n" });
+    expect(getGroupHeading(outline, outline.sections[1], { posted, current }).text).toBe(
+      `# 2. Big\n\n+7 −2 lines, 2 files · regroup: merge-base changed\n\n${note}${earlier}\n\nSummary of Big\n`);
+    expect(getGroupHeading(outline, outline.sections[1], { posted: { ...posted, baseRef: "origin/main" }, current })
+      .text).toContain("> **Regroup needed:** the base branch changed from `origin/main` to `origin/develop` since "
+      + "the groups were posted, so the diffs below");
+    // Ungrouped files' diffs are whole files anyway
+    expect(getGroupHeading(outline, outline.sections[2], { posted, current }).text).not.toContain("Regroup");
   });
 
   it("replaces slashes in group names, since the heading's file name is a URI path", () => {

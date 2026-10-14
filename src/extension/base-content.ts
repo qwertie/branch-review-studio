@@ -129,9 +129,10 @@ export class HeadingContentProvider extends SnapshotContentProvider {
   provideTextDocumentContent(uri: vscode.Uri): string {
     let query = new URLSearchParams(uri.query);
     let groupId = query.get("group") ?? undefined;
-    let { outline } = this.model.snapshot;
+    let { outline, review, mergeBase } = this.model.snapshot;
     let section = outline.sections.find(s => s.group && s.group.id === groupId);
-    let heading = section && getGroupHeading(outline, section);
+    let posted = review?.changeGroups;
+    let heading = section && getGroupHeading(outline, section, posted && mergeBase && { posted, current: mergeBase });
     return heading ? (query.get("side") === "original" ? heading.originalText : heading.text)
       : "This group is no longer in the review.\n";
   }
