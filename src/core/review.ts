@@ -11,7 +11,7 @@ export interface Review {
   branch: string;
   /**
    * Name of the branch that the review compares against, without `origin/`, e.g. `develop`
-   * (findMergeBase uses `origin/develop` if it exists)
+   * (findMergeBase uses `origin/develop` if it exists), or a commit SHA, tag or other revision
    */
   baseBranch: string;
   /**
@@ -19,6 +19,11 @@ export interface Review {
    * when the extension created the review); the MCP tools read base-side files at this commit
    */
   mergeBaseSha: string;
+  /**
+   * The commits of the latest agent review, recorded by the MCP server; undefined if no agent has
+   * reviewed the branch with a version of this tool newer than 1.1.0
+   */
+  reviewedCommits?: ReviewedCommits;
   /** ISO timestamp */
   createdAt: string;
   /** ISO timestamp, set by ReviewStore on every write */
@@ -29,6 +34,21 @@ export interface Review {
   threads: ReviewThread[];
   /** Groups of related changes, posted by the review_set_groups tool */
   changeGroups?: ChangeGroups;
+}
+
+/**
+ * What an agent's review compared (see MergeBaseInfo): the working tree, whose HEAD was `headSha`,
+ * against `mergeBaseSha`. The MCP server records it whenever it finds the merge-base for a review
+ * (see ReviewTools.beginReviewCore, used by review_begin and review_set_groups).
+ */
+export interface ReviewedCommits {
+  /** e.g. `origin/develop`, or a commit SHA if the review's base is one */
+  baseRef: string;
+  /** Commit that `baseRef` pointed to */
+  baseSha: string;
+  mergeBaseSha: string;
+  /** Commit checked out in the working tree; the working tree may have had uncommitted changes too */
+  headSha: string;
 }
 
 /**
@@ -181,6 +201,14 @@ export function createReview(branch: string, baseBranch: string, mergeBaseSha: s
   let now = new Date().toISOString();
   return { schemaVersion: reviewSchemaVersion, branch, baseBranch: getBaseBranchName(baseBranch), mergeBaseSha,
     createdAt: now, updatedAt: now, sessions: [], threads: [] };
+}
+
+/**
+ * Gets the merge-bases that a review recorded, which findMergeBase falls back on if the base
+ * already contains HEAD but has no merge commit of it (e.g. after a fast-forward merge).
+ */
+export function getRecordedMergeBases(review: Review | undefined): string[] {
+  return [review?.reviewedCommits?.mergeBaseSha, review?.mergeBaseSha].filter((sha): sha is string => !!sha);
 }
 
 /** Gets the form of a base branch name stored in Review.baseBranch: without a leading `origin/`. */

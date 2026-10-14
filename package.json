@@ -369,7 +369,7 @@
         "branchReviewStudio.baseBranch": {
           "type": "string",
           "default": "develop",
-          "description": "Branch to compare against when the current branch has no review yet; a review keeps the base branch it was created with until you run Change Base Branch…. The diff base is `git merge-base origin/<baseBranch> HEAD` if origin/<baseBranch> exists, else `git merge-base <baseBranch> HEAD`."
+          "description": "Branch to compare against when the current branch has no review yet; a review keeps the base branch it was created with until you run Change Base Branch…. The diff base is `git merge-base origin/<baseBranch> HEAD` if origin/<baseBranch> exists, else `git merge-base <baseBranch> HEAD` (if that is HEAD because the base already contains the branch, the merge-base from before the merge)."
         },
         "branchReviewStudio.openWorktreeInNewWindow": {
           "type": "boolean",

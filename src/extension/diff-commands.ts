@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { getErrorMessage } from "../core/files";
-import { ChangedFile, fetchBranch } from "../core/git";
+import { ChangedFile, fetchBranch, isShaOf } from "../core/git";
 import { ChangesEntry, getWorkingTreeLine, listChangesEntries, listThreadVisits } from "../core/review-outline";
 import { getBaseUri, getGroupViewUri, getHeadingUri } from "./base-content";
 import { ReviewCommentController } from "./comments";
@@ -95,22 +95,28 @@ export async function revealThread(model: BranchReviewModel, comments: ReviewCom
 /**
  * Runs `git fetch origin <baseBranch>`, then refreshes. If the branch has a review, it also stores
  * the new merge-base in it, because the MCP tools read base-side files at `review.mergeBaseSha`.
- * Nothing else in the extension fetches.
+ * Nothing else in the extension fetches. If the base is a commit SHA, it just says so.
  */
 export async function fetchBase(model: BranchReviewModel): Promise<void> {
   let baseBranch = model.baseBranch;
-  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
-    title: `Fetching origin/${baseBranch}…` }, async () => {
-    try {
-      await fetchBranch(model.repoRoot, "origin", baseBranch);
-    } catch (e) {
-      void vscode.window.showErrorMessage(getErrorMessage(e));
-    }
-  });
-  if (model.snapshot.review)
-    await model.changeBaseBranch(baseBranch);
-  else
-    await model.refresh();
+  let baseSha = model.snapshot.mergeBase?.baseSha;
+  if (baseSha && isShaOf(baseBranch, baseSha)) {
+    void vscode.window.showInformationMessage(`The base is commit ${baseBranch}, not a branch, so there is nothing `
+      + "to fetch.");
+  } else {
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
+      title: `Fetching origin/${baseBranch}…` }, async () => {
+      try {
+        await fetchBranch(model.repoRoot, "origin", baseBranch);
+      } catch (e) {
+        void vscode.window.showErrorMessage(getErrorMessage(e));
+      }
+    });
+    if (model.snapshot.review)
+      await model.changeBaseBranch(baseBranch);
+    else
+      await model.refresh();
+  }
 }
 
 /**

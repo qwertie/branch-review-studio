@@ -69,8 +69,8 @@ const ungroupedName = "Ungrouped";
  * assigns them to groups (see assignHunksToGroups). Throws an error listing every problem. Returns
  * the groups plus notes for the agent about hunks and ranges that matched nothing.
  */
-export async function createChangeGroups(repoRoot: string, mergeBase: MergeBaseInfo, changedFiles: ChangedFile[],
-  input: ChangeGroupsInput): Promise<{ changeGroups: ChangeGroups, notes: string[] }> {
+export async function createChangeGroups(repoRoot: string, mergeBase: Pick<MergeBaseInfo, "baseRef" | "mergeBaseSha">,
+  changedFiles: ChangedFile[], input: ChangeGroupsInput): Promise<{ changeGroups: ChangeGroups, notes: string[] }> {
   let { baseRef, mergeBaseSha } = mergeBase;
   let problems: string[] = [];
   let groupIds = input.groups.map(g => g.id);

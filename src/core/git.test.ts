@@ -2,9 +2,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  addWorktree, findMergeBase, findRepoRoot, getBaseBranchChoices, getChangedFiles, getCurrentBranch,
-  getDefaultWorktreePath, getFileAtRevision, getGitCommonDir, listBranches, listWorktrees, parseBranchRefs,
-  parseWorktreeList,
+  addWorktree, countCommitsSince, findMergeBase, findRepoRoot, getBaseBranchChoices, getChangedFiles,
+  getCurrentBranch, getDefaultWorktreePath, getFileAtRevision, getGitCommonDir, listBranches, listWorktrees,
+  parseBranchRefs, parseWorktreeList,
 } from "./git";
 import { createTempDir, TempRepo } from "./test-helpers";
 
@@ -45,14 +45,135 @@ describe("findMergeBase", () => {
 
     let result = await findMergeBase(repo.root, "develop");
 
-    expect(result).toEqual({ baseRef: "develop", mergeBaseSha: firstSha });
+    expect(result).toMatchObject({ baseRef: "develop", mergeBaseSha: firstSha });
   });
 
   it("throws a readable error when the base branch does not exist", async () => {
     let { repo } = createRepoWithFeatureBranch();
     await expect(findMergeBase(repo.root, "nonexistent")).rejects.toThrow(/nonexistent/);
   });
+
+  it("returns the SHAs of HEAD and the base ref", async () => {
+    let { repo, firstSha } = createRepoWithFeatureBranch();
+    let headSha = commitOn(repo, "feature", { "a.txt": "a2\n" });
+    let developSha = commitOn(repo, "develop", { "b.txt": "b2\n" });
+    repo.git("checkout", "-q", "feature");
+
+    expect(await findMergeBase(repo.root, "develop"))
+      .toEqual({ baseRef: "develop", baseSha: developSha, headSha, mergeBaseSha: firstSha });
+  });
+
+  it("accepts a commit SHA, an abbreviated SHA, a tag or a revision expression as the base, without looking for "
+    + "origin/<sha> or origin/<expression>", async () => {
+    let { repo, firstSha } = createRepoWithFeatureBranch();
+    let headSha = commitOn(repo, "feature", { "a.txt": "a2\n" });
+    let developSha = commitOn(repo, "develop", { "b.txt": "b2\n" });
+    commitOn(repo, "develop", { "b.txt": "b3\n" });
+    repo.git("checkout", "-q", "feature");
+    repo.git("tag", "v1", developSha);
+    repo.git("update-ref", `refs/remotes/origin/${developSha}`, repo.git("rev-parse", "develop"));
+    repo.git("update-ref", "refs/remotes/origin/develop", headSha);
+
+    for (let base of [developSha, developSha.slice(0, 8), "v1", "develop~1"]) {
+      expect(await findMergeBase(repo.root, base))
+        .toEqual({ baseRef: base, baseSha: developSha, headSha, mergeBaseSha: firstSha });
+    }
+  });
+
+  it("when the base merged the branch with a merge commit, uses the merge-base from before that merge, which is "
+    + "the last base commit that the branch merged", async () => {
+    let { repo, lastMergedDevelopSha, headSha } = createBranchThatMergedDevelopTwice();
+    let developBeforeMergeSha = commitOn(repo, "develop", { "b.txt": "b4\n" });
+    repo.git("merge", "-q", "--no-ff", "-m", "Merge feature", "feature");
+    let mergeCommitSha = repo.git("rev-parse", "HEAD");
+    commitOn(repo, "develop", { "b.txt": "b5\n" });
+    repo.git("checkout", "-q", "feature");
+
+    expect(await findMergeBase(repo.root, "develop")).toMatchObject({ baseRef: "develop", headSha,
+      mergeBaseSha: lastMergedDevelopSha, headInBase: { mergeCommitSha, isRecorded: false } });
+    // Comparing against the base as it was before the merge needs no special handling
+    expect(await findMergeBase(repo.root, developBeforeMergeSha)).toEqual({ baseRef: developBeforeMergeSha,
+      baseSha: developBeforeMergeSha, headSha, mergeBaseSha: lastMergedDevelopSha });
+  });
+
+  it("when the base was fast-forwarded to the branch, falls back to the first recorded merge-base that is an "
+    + "ancestor of HEAD, else HEAD", async () => {
+    let { repo, firstSha } = createRepoWithFeatureBranch();
+    let headSha = commitOn(repo, "feature", { "a.txt": "a2\n" });
+    repo.git("checkout", "-q", "develop");
+    repo.git("merge", "-q", "--ff-only", "feature");
+    let laterDevelopSha = commitOn(repo, "develop", { "b.txt": "b2\n" });
+    repo.git("checkout", "-q", "feature");
+
+    expect(await findMergeBase(repo.root, "develop"))
+      .toMatchObject({ mergeBaseSha: headSha, headInBase: { mergeCommitSha: undefined, isRecorded: false } });
+    expect(await findMergeBase(repo.root, "develop", [headSha, laterDevelopSha, "0".repeat(40), firstSha]))
+      .toMatchObject({ mergeBaseSha: firstSha, headInBase: { mergeCommitSha: undefined, isRecorded: true } });
+  });
+
+  it("treats a branch without commits of its own like a fast-forwarded one", async () => {
+    let { repo } = createRepoWithFeatureBranch();
+    commitOn(repo, "develop", { "b.txt": "b2\n" });
+    repo.git("checkout", "-q", "feature");
+    let headSha = repo.git("rev-parse", "HEAD");
+
+    expect(await findMergeBase(repo.root, "develop", [headSha]))
+      .toMatchObject({ mergeBaseSha: headSha, headInBase: { mergeCommitSha: undefined, isRecorded: false } });
+  });
+
+  it("is unaffected by a squash merge, since the base then doesn't contain HEAD", async () => {
+    let { repo, firstSha } = createRepoWithFeatureBranch();
+    let headSha = commitOn(repo, "feature", { "a.txt": "a2\n" });
+    repo.git("checkout", "-q", "develop");
+    repo.git("merge", "-q", "--squash", "feature");
+    let developSha = repo.commitAll("Squashed feature");
+    repo.git("checkout", "-q", "feature");
+
+    expect(await findMergeBase(repo.root, "develop"))
+      .toEqual({ baseRef: "develop", baseSha: developSha, headSha, mergeBaseSha: firstSha });
+  });
 });
+
+describe("countCommitsSince", () => {
+  it("counts HEAD's new commits, or returns undefined if HEAD's history lacks the commit", async () => {
+    let { repo, firstSha } = createRepoWithFeatureBranch();
+    let secondSha = commitOn(repo, "feature", { "a.txt": "a2\n" });
+    commitOn(repo, "feature", { "a.txt": "a3\n" });
+    let developSha = commitOn(repo, "develop", { "b.txt": "b2\n" });
+    repo.git("checkout", "-q", "feature");
+
+    expect(await countCommitsSince(repo.root, firstSha)).toBe(2);
+    expect(await countCommitsSince(repo.root, secondSha)).toBe(1);
+    expect(await countCommitsSince(repo.root, repo.git("rev-parse", "HEAD"))).toBe(0);
+    expect(await countCommitsSince(repo.root, developSha)).toBeUndefined();
+    expect(await countCommitsSince(repo.root, "0".repeat(40))).toBeUndefined();
+  });
+});
+
+/** Checks out `branch`, commits `files` there and returns the commit's SHA; leaves `branch` checked out. */
+function commitOn(repo: TempRepo, branch: string, files: Record<string, string>): string {
+  repo.git("checkout", "-q", branch);
+  repo.writeFiles(files);
+  return repo.commitAll(`${branch}: ${Object.values(files).join(" ").trim()}`);
+}
+
+/**
+ * Creates a `feature` branch that merged `develop` twice (each time after develop gained a commit)
+ * and then gained another commit; leaves `develop` checked out.
+ */
+function createBranchThatMergedDevelopTwice() {
+  let { repo } = createRepoWithFeatureBranch();
+  let lastMergedDevelopSha = "";
+  for (let i = 2; i <= 3; i++) {
+    commitOn(repo, "feature", { "a.txt": `a${i}\n` });
+    lastMergedDevelopSha = commitOn(repo, "develop", { "b.txt": `b${i}\n` });
+    repo.git("checkout", "-q", "feature");
+    repo.git("merge", "-q", "--no-ff", "-m", "Merge develop", "develop");
+  }
+  let headSha = commitOn(repo, "feature", { "a.txt": "a4\n" });
+  repo.git("checkout", "-q", "develop");
+  return { repo, lastMergedDevelopSha, headSha };
+}
 
 describe("getChangedFiles", () => {
   it("combines committed, staged, unstaged and untracked changes since the merge-base", async () => {

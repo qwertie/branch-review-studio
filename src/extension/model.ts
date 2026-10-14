@@ -3,12 +3,13 @@ import * as vscode from "vscode";
 import { AnchorLocation, locateAnchor, splitLines } from "../core/anchoring";
 import { getErrorMessage, getFullPath, getRepoRelativePath, readFileLines } from "../core/files";
 import {
-  ChangedFile, findMergeBase, getChangedFiles, getConfigValue, getCurrentBranch, MergeBaseInfo,
+  ChangedFile, countCommitsSince, findMergeBase, getChangedFiles, getConfigValue, getCurrentBranch, MergeBaseInfo,
 } from "../core/git";
 import { arrangeGroups, GroupLayout } from "../core/groups";
 import { DiffHunk, readDiffHunks } from "../core/hunks";
-import { createReview, DiffSide, getBaseBranchName, Review } from "../core/review";
+import { createReview, DiffSide, getBaseBranchName, getRecordedMergeBases, Review } from "../core/review";
 import { buildReviewOutline, ReviewOutline } from "../core/review-outline";
+import { ReviewedHeadInfo } from "../core/review-view-html";
 import { ReviewStore } from "../core/store";
 
 /** Everything the UI shows about the current branch, computed by BranchReviewModel.refresh. */
@@ -20,6 +21,8 @@ export interface ReviewSnapshot {
   mergeBaseError: string | undefined;
   changedFiles: ChangedFile[];
   review: Review | undefined;
+  /** The HEAD commit of the review's latest agent review, and how far HEAD has moved since */
+  reviewedHead: ReviewedHeadInfo | undefined;
   /** Current location of each thread in `review`, by thread id */
   threadLocations: Map<string, AnchorLocation>;
   /**
@@ -35,7 +38,7 @@ export interface ReviewSnapshot {
 }
 
 const emptySnapshot: ReviewSnapshot = { branch: undefined, mergeBase: undefined, mergeBaseError: undefined,
-  changedFiles: [], review: undefined, threadLocations: new Map(), groupLayout: undefined,
+  changedFiles: [], review: undefined, reviewedHead: undefined, threadLocations: new Map(), groupLayout: undefined,
   outline: { sections: [], isStale: false } };
 
 /**
@@ -120,7 +123,8 @@ export class BranchReviewModel implements vscode.Disposable {
    * `branchReviewStudio.baseBranch` setting is unchanged.
    */
   async changeBaseBranch(baseBranch: string): Promise<void> {
-    let mergeBase = await findMergeBase(this.repoRoot, baseBranch);
+    let mergeBase = await findMergeBase(this.repoRoot, baseBranch,
+      getRecordedMergeBases(this.currentSnapshot.review));
     await this.modifyReview(review => {
       review.baseBranch = getBaseBranchName(baseBranch);
       review.mergeBaseSha = mergeBase.mergeBaseSha;
@@ -168,10 +172,13 @@ export class BranchReviewModel implements vscode.Disposable {
     let mergeBase: MergeBaseInfo | undefined;
     let mergeBaseError: string | undefined;
     try {
-      mergeBase = await findMergeBase(this.repoRoot, this.getBaseBranch(review));
+      mergeBase = await findMergeBase(this.repoRoot, this.getBaseBranch(review), getRecordedMergeBases(review));
     } catch (e) {
       mergeBaseError = getErrorMessage(e);
     }
+    let reviewedSha = review?.reviewedCommits?.headSha;
+    let reviewedHead = reviewedSha === undefined ? undefined : { sha: reviewedSha,
+      newCommitCount: reviewedSha === mergeBase?.headSha ? 0 : await countCommitsSince(this.repoRoot, reviewedSha) };
     let changedFiles = mergeBase ? await getChangedFiles(this.repoRoot, mergeBase.mergeBaseSha) : [];
     let threadLocations = new Map<string, AnchorLocation>();
     let linesByFile = new Map<string, Promise<string[] | undefined>>();
@@ -192,7 +199,8 @@ export class BranchReviewModel implements vscode.Disposable {
         ? await readDiffHunks(this.repoRoot, mergeBase.mergeBaseSha, file).catch(() => []) : []);
     }
     let outline = buildReviewOutline({ changedFiles, review, threadLocations, groupLayout, baseThreadHunks });
-    return { branch, mergeBase, mergeBaseError, changedFiles, review, threadLocations, groupLayout, outline };
+    return { branch, mergeBase, mergeBaseError, changedFiles, review, reviewedHead, threadLocations, groupLayout,
+      outline };
   }
 
   private getBaseBranch(review: Review | undefined): string {

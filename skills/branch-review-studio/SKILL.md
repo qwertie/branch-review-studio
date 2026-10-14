@@ -26,7 +26,8 @@ contain, in any order:
   stuff": show and post only Critical and Major findings, not Minor ones
 - `--all`: also show and post Nits (cosmetic findings)
 - `--no-tests`: skip the test runs
-- `--base <branch>`: compare against this branch instead of the review's base branch
+- `--base <branch or commit>`: compare against this branch, or a commit SHA or tag, instead of the
+  review's base branch
 - `--thorough`, or a request such as "be thorough", "be comprehensive", "deep review", "use
   subagents" or "use multiple sub-agents": thorough mode (Step 4). Without it, review in a single
   context; thorough mode costs several times as many tokens.
@@ -39,14 +40,18 @@ another branch to review, tell them to open that branch's worktree (Branch Revie
 ## Step 1 — Start the review and get the diff
 
 1. Call `review_begin` (with `baseBranch` if `--base` was given). It reports the base branch
-   (`<base>` below; the existing review's base, else `develop`) and the merge-base, and lists the
-   open threads. Without the tools, `<base>` is `--base`, else `develop`.
-2. Run `git fetch origin <base>` (skip silently if there is no `origin` or no network). If the
-   fetch moved `origin/<base>`, call `review_begin` again, since it computes the merge-base from
-   `origin/<base>`. Without the tools, use `git merge-base origin/<base> HEAD` (or `<base>` if
-   there is no `origin/<base>`).
-3. Branch tracking: if `git merge-base --is-ancestor origin/<base> HEAD` fails, the branch is
-   behind. Report "Branch is N commits behind `<base>` — needs to catch up"
+   (`<base>` below; the existing review's base, else `develop`), the ref it compares against and
+   the merge-base, and lists the open threads. Without the tools, `<base>` is `--base`, else
+   `develop`.
+2. If `<base>` is a branch (not a commit SHA or tag), run `git fetch origin <base>` (skip silently
+   if there is no `origin` or no network). If the fetch moved `origin/<base>`, call `review_begin`
+   again, since it computes the merge-base from `origin/<base>`. Without the tools, use
+   `git merge-base origin/<base> HEAD` (or `<base>` if there is no `origin/<base>`).
+3. Branch tracking: if `review_begin` says that the ref already contains this branch or HEAD, skip
+   the check below, and if the branch has commits (`git log -1 <merge-base>..HEAD` shows one),
+   say "Branch is already merged into `<base>`" in the summary. Otherwise, if
+   `git merge-base --is-ancestor origin/<base> HEAD` fails (with `<base>` itself for a commit or
+   tag), the branch is behind. Report "Branch is N commits behind `<base>` — needs to catch up"
    (N = `git rev-list --count HEAD..origin/<base>`) as a **Major** item in the summary (Steps 6
    and 7), not as a thread, since a thread needs a file and line. Don't abort.
 4. Diff context, with `MB` = the merge-base:

@@ -184,8 +184,12 @@ ${vscodeChatSection}
     let baseBranch = model.baseBranch;
     let options = (await getBaseBranchOptions(model))
       .map(name => `<option${name === baseBranch ? " selected" : ""}>${escapeHtml(name)}</option>`);
-    let mergeBaseText = mergeBase ? `<code>${mergeBase.mergeBaseSha.slice(0, 10)}</code> (merge-base of HEAD and `
-      + `${escapeHtml(mergeBase.baseRef)})` : `<span class="error">${escapeHtml(mergeBaseError ?? "unknown")}</span>`;
+    let baseRef = escapeHtml(mergeBase?.baseRef ?? "");
+    let mergeBaseKind = !mergeBase?.headInBase ? `merge-base of HEAD and ${baseRef}`
+      : mergeBase.mergeBaseSha === mergeBase.headSha ? `HEAD, which ${baseRef} already contains`
+        : `${baseRef} already contains HEAD, so this is the merge-base from before the merge`;
+    let mergeBaseText = mergeBase ? `<code>${mergeBase.mergeBaseSha.slice(0, 10)}</code> (${mergeBaseKind})`
+      : `<span class="error">${escapeHtml(mergeBaseError ?? "unknown")}</span>`;
     let reviewFileText = branch === undefined ? "none (detached HEAD)"
       : `<code>${escapeHtml(model.store.getReviewPath(branch))}</code> ` + (review
         ? `<button class="secondary" data-command="openReviewFile">Open Review File</button>` : "(not created yet)");

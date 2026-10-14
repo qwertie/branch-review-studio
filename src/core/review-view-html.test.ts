@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MergeBaseInfo } from "./git";
 import { createReview, ReviewThread } from "./review";
 import { buildReviewOutline, ReviewOutline } from "./review-outline";
 import { parseViewMessage, renderReviewViewBody, ReviewViewData } from "./review-view-html";
@@ -27,10 +28,14 @@ function createOutline(): ReviewOutline {
         files: [{ path: "b.cs", isPartial: false }] }] } });
 }
 
+const mergeBase: MergeBaseInfo = { baseRef: "origin/develop", baseSha: "baseba5e", headSha: "4ead4ead",
+  mergeBaseSha: "0123456789abcdef" };
+const mergeBaseHtml = `<code title="merge-base 0123456789abcdef">01234567</code>`;
+
 function render(outline = createOutline(), overrides: Partial<ReviewViewData> = {}): string {
   return renderReviewViewBody({ branch: `feature/${evil}`, baseBranch: "develop", outline, summary: `Review ${evil}`,
-    mergeBase: { baseRef: "origin/develop", mergeBaseSha: "0123456789abcdef" }, mergeBaseError: undefined,
-    postedGroups: undefined, ...overrides });
+    mergeBase, mergeBaseError: undefined, postedGroups: undefined, hasReview: true, reviewedHead: undefined,
+    ...overrides });
 }
 
 describe("renderReviewViewBody", () => {
@@ -82,6 +87,38 @@ describe("renderReviewViewBody", () => {
           + "file. Ask the agent to post the groups again.</div>");
       }
     });
+
+  it("says when the base already contains HEAD, and what the diff is against then", () => {
+    let mergeCommit = { ...mergeBase, headInBase: { mergeCommitSha: "1111111111111111", isRecorded: false } };
+    expect(render(undefined, { mergeBase: mergeCommit })).toContain(`<div class="notice">This branch is already `
+      + `merged into <code>origin/develop</code> (merge commit <code title="merge commit 1111111111111111">11111111`
+      + `</code>), so the diff is against ${mergeBaseHtml}, the merge-base from before the merge.</div>`);
+    let recorded = { ...mergeBase, headInBase: { mergeCommitSha: undefined, isRecorded: true } };
+    expect(render(undefined, { mergeBase: recorded })).toContain(`<div class="notice"><code>origin/develop</code> `
+      + `already contains HEAD (e.g. after a fast-forward merge), so the diff is against ${mergeBaseHtml}, the `
+      + "merge-base that the review recorded.</div>");
+    let none = { ...mergeBase, headInBase: { mergeCommitSha: undefined, isRecorded: false } };
+    let noneNotice = `<div class="notice"><code>origin/develop</code> already contains HEAD, so the diff shows only `
+      + "uncommitted changes: this branch was fast-forward merged into it, or has no commits of its own. To see a "
+      + "merged branch's changes, use Change Base Branch… to compare with the commit that "
+      + "<code>origin/develop</code> was at before the merge.</div>";
+    expect(render(undefined, { mergeBase: none })).toContain(noneNotice);
+    // Without a review, the branch is presumably new rather than merged
+    expect(render(undefined, { mergeBase: none, hasReview: false })).not.toContain("already contains HEAD");
+    expect(render()).not.toContain("already");
+  });
+
+  it("says which commit the agent reviewed and how many commits HEAD has gained since", () => {
+    let reviewedHtml = `<div class="notice">Reviewed commit <code title="reviewed commit abcdef1234567890">abcdef12`
+      + "</code>";
+    for (let [newCommitCount, text] of [[0, " (the current HEAD)."], [1, "; 1 commit since the review."],
+      [3, "; 3 commits since the review."],
+      [undefined, ", which HEAD's history no longer contains (rebased or reset?)."]] as const) {
+      expect(render(undefined, { reviewedHead: { sha: "abcdef1234567890", newCommitCount } }))
+        .toContain(reviewedHtml + text + "</div>");
+    }
+    expect(render()).not.toContain("Reviewed commit");
+  });
 
   it("says that the base branch changed since the groups were posted, if it did", () => {
     let html = render({ ...createOutline(), isStale: true },

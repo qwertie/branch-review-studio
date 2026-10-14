@@ -9,6 +9,16 @@ VS Code's own chat agent) rather than humans.
   commits the branch has. `<base>` is `origin/develop` if it exists, else `develop`. A new review
   gets its base branch from the setting `branchReviewStudio.baseBranch` (or from `review_begin`'s
   `baseBranch` argument) and keeps it until you run **Change Base Branch…**.
+- After the base branch merges the branch (with a merge commit), `git merge-base <base> HEAD` is
+  HEAD itself, so the view would show only uncommitted changes. Instead, it compares against the
+  merge-base from before the merge (`git merge-base M^1 HEAD`, where M is the merge commit on the
+  base's first-parent history), and a notice says so. After a fast-forward merge there is no merge
+  commit, so it uses the merge-base recorded in the branch's review, if any; otherwise, if the
+  branch has a review, a notice suggests **Change Base Branch…** with the base's commit from
+  before the merge. A squash merge doesn't affect the merge-base.
+- When an agent reviews the branch, the MCP server records in the review the base ref and its
+  commit, the merge-base and HEAD. The view then shows which commit was reviewed and how many
+  commits HEAD has gained since (or that HEAD's history no longer contains it, after a rebase).
 - Clicking a file opens a diff editor (merge-base vs. working file). The modified side is the real
   file, so you can edit it in place. **Open All Changes** opens all files in one multi-diff editor,
   in the order of the view.
@@ -116,7 +126,8 @@ its docs and manifests), reviews correctness, security, performance, project con
 threads already raise, posts Critical, Major and Minor findings as threads (only Critical and
 Major with `--no-minor`; also cosmetic Nits with `--all`), posts groups of related changes, and
 summarizes the changes and findings in chat. Options: `--no-minor`, `--all`, `--no-tests`,
-`--base <branch>`, `--thorough`, plus free-form context. It never switches branches or stashes.
+`--base <branch or commit>`, `--thorough`, plus free-form context. It never switches branches or
+stashes.
 
 ## Usage
 
@@ -130,11 +141,14 @@ summarizes the changes and findings in chat. Options: `--no-minor`, `--all`, `--
    collapsed while VS Code runs.
 2. To compare against a different branch (e.g. `main` instead of `develop`), click the
    **Change Base Branch…** button (two arrows) in the view's header, and
-   pick a branch; the current base is listed first, then `develop`, `main` and `master`. The choice
-   is saved in the branch's review (which is created if needed), so it applies to this branch only,
-   and Claude Code's review tools use it too; the `branchReviewStudio.baseBranch` setting doesn't
-   change. Threads on the base side of the diff were anchored to the old merge-base, so they may
-   move or show as outdated (you're asked first if there are any).
+   pick a branch; the current base is listed first, then `develop`, `main` and `master`. To compare
+   against a commit (e.g. the base's commit from before the branch was merged), tag or other
+   revision, type it and pick **Use a commit or other ref…**; with a commit SHA, `origin/` is not
+   tried and **Fetch Base Branch** doesn't fetch. The choice is saved in the branch's review
+   (which is created if needed), so it applies to this branch only, and Claude Code's review tools
+   use it too; the `branchReviewStudio.baseBranch` setting doesn't change. Threads on the base
+   side of the diff were anchored to the old merge-base, so they may move or show as outdated
+   (you're asked first if there are any).
 3. The extension never fetches on its own. To update the base, run **Fetch Base Branch** (view
    `...` menu), which runs `git fetch origin <baseBranch>`.
 4. Ask an agent for a review (see "How to run a review connected to the extension" above). The

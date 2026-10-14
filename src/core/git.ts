@@ -15,9 +15,34 @@ export interface ChangedFile {
 
 /** The commit that a branch's changes are compared against, and how it was found. */
 export interface MergeBaseInfo {
-  /** The ref that was compared against, e.g. `origin/develop` or `develop` */
+  /**
+   * The ref that was compared against, e.g. `origin/develop` or `develop`, or a commit SHA, tag or
+   * other revision
+   */
   baseRef: string;
+  /** Commit that `baseRef` points to */
+  baseSha: string;
+  /** Commit checked out in the working tree (HEAD) */
+  headSha: string;
   mergeBaseSha: string;
+  /**
+   * Set if `baseRef` already contains HEAD, e.g. because the branch was merged into it; then
+   * `git merge-base <baseRef> HEAD` is HEAD itself, and `mergeBaseSha` is found another way (see
+   * findMergeBase)
+   */
+  headInBase?: HeadInBaseInfo;
+}
+
+/** How findMergeBase chose the merge-base of a branch that the base already contains. */
+export interface HeadInBaseInfo {
+  /**
+   * The commit on the base's first-parent history that merged HEAD into the base; undefined if
+   * that history includes HEAD itself (after a fast-forward merge, or if the branch has no commits
+   * of its own) or the merge is too far back to look for
+   */
+  mergeCommitSha: string | undefined;
+  /** Whether the merge-base is one that the review recorded earlier (see findMergeBase) */
+  isRecorded: boolean;
 }
 
 /** A working tree of the repo, from `git worktree list`. */
@@ -45,14 +70,56 @@ export class GitError extends Error {}
 
 /**
  * Finds the commit to diff the working tree against: `git merge-base <baseRef> HEAD`, where
- * baseRef is `origin/<baseBranch>` if it exists, else `<baseBranch>`.
+ * baseRef is `baseBranch` if that is a commit SHA, else `origin/<baseBranch>` if it exists, else
+ * `<baseBranch>` (a local branch, tag or other revision).
+ *
+ * If baseRef already contains HEAD, that merge-base is HEAD, so the diff would show only
+ * uncommitted changes. Then, if baseRef's first-parent history has a merge commit M that brought
+ * HEAD in, the merge-base is `git merge-base M^1 HEAD`, i.e. the merge-base as it was before the
+ * merge. Otherwise (e.g. after a fast-forward merge) it is the first of `recordedMergeBases` that
+ * is an ancestor of HEAD other than HEAD itself, if any.
  */
-export async function findMergeBase(repoRoot: string, baseBranch: string): Promise<MergeBaseInfo> {
-  let baseRef = await findBaseRef(repoRoot, baseBranch);
-  if (baseRef === undefined)
-    throw new GitError(`Base branch '${baseBranch}' was not found (neither origin/${baseBranch} nor ${baseBranch}).`);
-  let mergeBaseSha = (await runGit(repoRoot, ["merge-base", baseRef, "HEAD"])).trim();
-  return { baseRef, mergeBaseSha };
+export async function findMergeBase(repoRoot: string, baseBranch: string, recordedMergeBases: string[] = [])
+  : Promise<MergeBaseInfo> {
+  let base = await findBaseRef(repoRoot, baseBranch);
+  if (base === undefined) {
+    throw new GitError(`Base '${baseBranch}' was not found (neither origin/${baseBranch} nor ${baseBranch} is a `
+      + "branch or commit).");
+  }
+  let headSha = (await runGit(repoRoot, ["rev-parse", "HEAD"])).trim();
+  let mergeBaseSha = (await runGit(repoRoot, ["merge-base", base.sha, headSha])).trim();
+  let info: MergeBaseInfo = { baseRef: base.ref, baseSha: base.sha, headSha, mergeBaseSha };
+  if (mergeBaseSha === headSha) {
+    let merge = await findMergeOfHead(repoRoot, base.sha, headSha);
+    let recordedSha = merge ? undefined : await findAsync(recordedMergeBases, async sha => sha !== headSha
+      && await tryRunGit(repoRoot, ["merge-base", "--is-ancestor", sha, headSha]) !== undefined);
+    info.mergeBaseSha = merge?.mergeBaseSha ?? recordedSha ?? headSha;
+    info.headInBase = { mergeCommitSha: merge?.mergeCommitSha, isRecorded: recordedSha !== undefined };
+  }
+  return info;
+}
+
+/**
+ * Counts the commits in HEAD's history that aren't in `sha`'s; returns undefined if HEAD's history
+ * doesn't contain `sha` (e.g. after a rebase) or `sha` doesn't exist.
+ */
+export async function countCommitsSince(repoRoot: string, sha: string): Promise<number | undefined> {
+  let output = await tryRunGit(repoRoot, ["rev-list", "--left-right", "--count", `${sha}...HEAD`]);
+  let [onlyInSha, onlyInHead] = output?.trim().split(/\s+/).map(Number) ?? [];
+  return onlyInSha === 0 ? onlyInHead : undefined;
+}
+
+/**
+ * Gets whether `revision` is the commit SHA `sha` or an abbreviation of it, i.e. names the commit by
+ * its SHA rather than by a branch or tag.
+ */
+export function isShaOf(revision: string, sha: string): boolean {
+  return sha.startsWith(revision.toLowerCase());
+}
+
+/** Gets the full SHA of the commit that `revision` names, or undefined if it names none. */
+export async function tryGetCommitSha(repoRoot: string, revision: string): Promise<string | undefined> {
+  return (await tryRunGit(repoRoot, ["rev-parse", "--verify", "--quiet", `${revision}^{commit}`]))?.trim();
 }
 
 /**
@@ -227,15 +294,81 @@ async function tryRunGit(cwd: string, args: string[]): Promise<string | undefine
   }
 }
 
-/** Finds `origin/<baseBranch>`, else `<baseBranch>` as a local branch or any other revision. */
-async function findBaseRef(repoRoot: string, baseBranch: string): Promise<string | undefined> {
-  for (let [candidate, fullRef] of [
-    [`origin/${baseBranch}`, `refs/remotes/origin/${baseBranch}`],
-    [baseBranch, `refs/heads/${baseBranch}`],
-    [baseBranch, baseBranch],
-  ]) {
-    if (await tryRunGit(repoRoot, ["rev-parse", "--verify", "--quiet", `${fullRef}^{commit}`]) !== undefined)
-      return candidate;
+/**
+ * Finds the ref that findMergeBase compares against, and its commit: `baseBranch` if it is a
+ * (possibly abbreviated) commit SHA or can't be a branch name (e.g. `develop~3`), else
+ * `origin/<baseBranch>`, else `<baseBranch>` as a local branch or any other revision (e.g. a tag).
+ */
+async function findBaseRef(repoRoot: string, baseBranch: string): Promise<{ ref: string, sha: string } | undefined> {
+  let sha = await tryGetCommitSha(repoRoot, baseBranch);
+  // The characters that `git check-ref-format` forbids in ref names, other than "/" and "."
+  let isRevisionExpression = /[~^:?*[\\\s]|@\{/.test(baseBranch);
+  if (sha && (isShaOf(baseBranch, sha) || isRevisionExpression))
+    return { ref: baseBranch, sha };
+  for (let [ref, fullRef] of [[`origin/${baseBranch}`, `refs/remotes/origin/${baseBranch}`],
+    [baseBranch, `refs/heads/${baseBranch}`]]) {
+    let branchSha = await tryGetCommitSha(repoRoot, fullRef);
+    if (branchSha !== undefined)
+      return { ref, sha: branchSha };
+  }
+  return sha === undefined ? undefined : { ref: baseBranch, sha };
+}
+
+/**
+ * For a base commit that contains HEAD, finds the oldest commit M on the base's first-parent
+ * history that contains HEAD and, if M is a merge (M^1 lacks HEAD), returns M and
+ * `git merge-base M^1 HEAD`. Returns undefined if HEAD is on that history or M is further back
+ * than maxFirstParentCommits. Results are cached, since the view refreshes often.
+ */
+function findMergeOfHead(repoRoot: string, baseSha: string, headSha: string): Promise<MergeOfHead | undefined> {
+  let key = `${baseSha} ${headSha}`;
+  let result = mergeOfHeadCache.get(key);
+  if (result === undefined) {
+    if (mergeOfHeadCache.size >= 100)
+      mergeOfHeadCache.clear();
+    result = findMergeOfHeadCore();
+    mergeOfHeadCache.set(key, result);
+    result.catch(() => mergeOfHeadCache.delete(key));
+  }
+  return result;
+
+  async function findMergeOfHeadCore(): Promise<MergeOfHead | undefined> {
+    let range = `${headSha}..${baseSha}`;
+    let [firstParentOutput, descendantOutput] = await Promise.all([
+      runGit(repoRoot, ["rev-list", "--first-parent", "--parents", `--max-count=${maxFirstParentCommits}`, range]),
+      runGit(repoRoot, ["rev-list", "--ancestry-path", range]),
+    ]);
+    // The base's first-parent history (newest first, each commit with its parents) contains HEAD
+    // from its start up to M; if all of the listed part contains HEAD, M may be further back
+    let descendants = new Set(descendantOutput.split("\n"));
+    let firstParents = firstParentOutput.split("\n").filter(line => line !== "").map(line => line.split(" "));
+    let mIndex = firstParents.findLastIndex(([sha]) => descendants.has(sha));
+    let [mergeCommitSha, firstParentSha] = mIndex < maxFirstParentCommits - 1 ? firstParents[mIndex] ?? [] : [];
+    let mergeBaseSha = firstParentSha !== undefined && firstParentSha !== headSha
+      ? (await tryRunGit(repoRoot, ["merge-base", firstParentSha, headSha]))?.trim() : undefined;
+    return mergeBaseSha ? { mergeCommitSha, mergeBaseSha } : undefined;
+  }
+}
+
+/** A merge commit that brought HEAD into the base, and HEAD's merge-base with the commit's first parent. */
+interface MergeOfHead {
+  mergeCommitSha: string;
+  mergeBaseSha: string;
+}
+
+/** Caches the results of findMergeOfHead by base and HEAD commit. */
+const mergeOfHeadCache = new Map<string, Promise<MergeOfHead | undefined>>();
+/**
+ * findMergeOfHead looks for the merge of HEAD among this many of the newest commits of the base's
+ * first-parent history.
+ */
+const maxFirstParentCommits = 10_000;
+
+/** Finds the first item for which `predicate` returns true, testing one item at a time. */
+async function findAsync<T>(items: T[], predicate: (item: T) => Promise<boolean>): Promise<T | undefined> {
+  for (let item of items) {
+    if (await predicate(item))
+      return item;
   }
   return undefined;
 }

@@ -59,6 +59,46 @@ describe("ReviewTools", () => {
     expect((await readReview(repo)).baseBranch).toBe("develop");
   });
 
+  it("beginReview records the base ref and the commits that the review compares", async () => {
+    let repo = createFeatureRepo();
+    let developSha = repo.git("rev-parse", "develop");
+    repo.commitAll("Return 2");
+
+    await createTools(repo).beginReview({});
+
+    expect((await readReview(repo)).reviewedCommits).toEqual({ baseRef: "develop", baseSha: developSha,
+      mergeBaseSha: developSha, headSha: repo.git("rev-parse", "HEAD") });
+  });
+
+  it("beginReview of a branch that develop merged uses the merge-base from before the merge, and says so",
+    async () => {
+      let repo = createFeatureRepo();
+      let developSha = repo.git("rev-parse", "develop");
+      repo.commitAll("Return 2");
+      repo.git("checkout", "-q", "develop");
+      repo.git("merge", "-q", "--no-ff", "-m", "Merge feature", "feature");
+      let mergeCommitSha = repo.git("rev-parse", "HEAD");
+      repo.git("checkout", "-q", "feature");
+
+      let result = await createTools(repo).beginReview({});
+
+      expect((await readReview(repo)).mergeBaseSha).toBe(developSha);
+      expect(result).toContain(`develop already contains this branch (merge commit ${mergeCommitSha}), so the `
+        + "merge-base is the one from before that merge.");
+    });
+
+  it("beginReview accepts a commit SHA as the base branch", async () => {
+    let repo = createFeatureRepo();
+    let firstSha = repo.git("rev-parse", "develop");
+    repo.commitAll("Return 2");
+    repo.git("branch", "-f", "develop", "HEAD");
+
+    await createTools(repo).beginReview({ baseBranch: firstSha });
+
+    expect(await readReview(repo)).toMatchObject({ baseBranch: firstSha, mergeBaseSha: firstSha,
+      reviewedCommits: { baseRef: firstSha, baseSha: firstSha } });
+  });
+
   it("addReviewComment accepts absolute or backslashed paths and anchors the line text", async () => {
     let repo = createFeatureRepo();
     let tools = createTools(repo);
@@ -153,16 +193,18 @@ describe("ReviewTools", () => {
     let repo = createFeatureRepo();
     let tools = createTools(repo);
     await tools.beginReview({});
+    repo.git("checkout", "-q", "develop");
     repo.writeFiles({ "src/c.ts": "c\n" });
     repo.git("add", "src/c.ts");
     repo.git("commit", "-q", "-m", "Add c");
-    repo.git("branch", "-f", "develop", "HEAD");
+    repo.git("checkout", "-q", "feature");
+    repo.git("merge", "-q", "--no-ff", "--no-edit", "develop");
 
     await tools.setGroups({ groups: [{ id: "a", name: "A", summary: "" }],
       files: [{ file: "src/a.ts", groups: [{ groupId: "a" }] }] });
 
     let review = await readReview(repo);
-    expect(review.mergeBaseSha).toBe(repo.git("rev-parse", "HEAD"));
+    expect(review.mergeBaseSha).toBe(repo.git("rev-parse", "develop"));
     expect(review.changeGroups).toMatchObject({ mergeBaseSha: review.mergeBaseSha, baseRef: "develop" });
   });
 

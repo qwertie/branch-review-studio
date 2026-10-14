@@ -111,12 +111,12 @@ export async function run(): Promise<void> {
       });
       assert.equal(model.snapshot.review!.threads.length, before);
     });
-    await check("changeBaseBranch stores the base and its merge-base in the review; changing back restores them",
-      async () => {
+    await check("changeBaseBranch stores the base (a branch or commit) and its merge-base in the review; changing "
+      + "back restores them", async () => {
         let originalBase = model.baseBranch;
         let otherBase = getBaseBranchChoices(await listBranches(model.repoRoot), originalBase, snapshot.branch)[1];
         assert.ok(otherBase, "the test repo needs a second branch to use as a base");
-        for (let base of [otherBase, originalBase]) {
+        for (let base of [otherBase, snapshot.mergeBase!.mergeBaseSha, originalBase]) {
           await model.changeBaseBranch(base);
           let mergeBase: MergeBaseInfo | undefined = model.snapshot.mergeBase;
           console.log(`INFO base=${base} baseRef=${mergeBase?.baseRef} mergeBase=${mergeBase?.mergeBaseSha}`);

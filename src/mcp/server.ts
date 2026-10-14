@@ -23,13 +23,15 @@ async function main(): Promise<void> {
   server.registerTool("review_begin", {
     description: "Starts (or resumes) the Branch Review Studio review of the git branch checked out in this "
       + "project, recording this session as the reviewer. The reviewed changes are the WORKING TREE "
-      + "(including uncommitted and untracked files) vs `git merge-base origin/<baseBranch> HEAD`. Existing "
-      + "threads are kept; the result lists open ones so that you don't post duplicates, and explains how to post "
-      + "findings and groups of related changes. Call this first.",
+      + "(including uncommitted and untracked files) vs `git merge-base origin/<baseBranch> HEAD` (if the base "
+      + "already contains the branch, the merge-base from before the merge). Existing threads are kept; the result "
+      + "lists open ones so that you don't post duplicates, and explains how to post findings and groups of related "
+      + "changes. Call this first.",
     inputSchema: {
       summary: z.string().optional().describe("Overall review summary (markdown); can also be set by review_finish"),
       baseBranch: z.string().optional()
-        .describe("Branch to compare against; default: the existing review's base, else 'develop'"),
+        .describe("Branch, or commit SHA or tag, to compare against; default: the existing review's base, else "
+          + "'develop'"),
     },
   }, (args, extra) => runTool(extra, tools => tools.beginReview(args)));
 

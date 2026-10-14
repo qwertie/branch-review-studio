@@ -9,8 +9,8 @@ import {
 } from "../core/git";
 import { arrangeGroups, ChangeGroupsInput, createChangeGroups, describeGroupSize } from "../core/groups";
 import {
-  addComment, addThread, createReview, DiffSide, formatCount, getBaseBranchName, getThread, IntegrationId,
-  recordSession, Review, ReviewThread, SessionRole, Severity, ThreadStatus,
+  addComment, addThread, createReview, DiffSide, formatCount, getBaseBranchName, getRecordedMergeBases, getThread,
+  IntegrationId, recordSession, Review, ReviewThread, SessionRole, Severity, ThreadStatus,
 } from "../core/review";
 import { ReviewStore } from "../core/store";
 import { mcpClientEnvVar, vscodeChatDisplayName } from "../core/vscode-chat";
@@ -73,10 +73,11 @@ export class ReviewTools {
   /** Creates or updates the branch's review and records the caller as the reviewing session. */
   async beginReview(args: { summary?: string, baseBranch?: string }): Promise<string> {
     let target = await this.findTarget();
-    let { review } = await this.beginReviewCore(target, args);
+    let { review, mergeBase } = await this.beginReviewCore(target, args);
     let openThreads = review.threads.filter(t => t.status === "open");
     return [
-      `Review of branch '${target.branch}' vs ${review.baseBranch} (merge-base ${review.mergeBaseSha}) is ready.`,
+      `Review of branch '${target.branch}' vs ${review.baseBranch} (ref ${mergeBase.baseRef}, merge-base `
+        + `${review.mergeBaseSha}) is ready.` + describeHeadInBase(mergeBase),
       `The reviewed changes are the working tree (including uncommitted and untracked files) vs the merge-base: `
         + `\`git diff ${review.mergeBaseSha}\` plus \`git ls-files --others --exclude-standard\`.`,
       `How to post the review:\n\n${findingInstructions}\n\n${groupingInstructions}\n\n`
@@ -175,20 +176,23 @@ export class ReviewTools {
 
   /**
    * Creates the branch's review, or updates its merge-base, and records the caller as the reviewing
-   * session; returns the saved review and the merge-base that it now has. Existing threads are
-   * kept, so that re-running a review converges. Without `args.baseBranch`, an existing review
-   * keeps its base (which the extension's `baseBranch` setting or Change Base Branch command may
-   * have chosen); a new review compares against 'develop'.
+   * session and the commits that it reviews (Review.reviewedCommits); returns the saved review and
+   * the merge-base that it now has. Existing threads are kept, so that re-running a review
+   * converges. Without `args.baseBranch`, an existing review keeps its base (which the extension's
+   * `baseBranch` setting or Change Base Branch command may have chosen); a new review compares
+   * against 'develop'.
    */
   private async beginReviewCore(target: ReviewTarget, args: { summary?: string, baseBranch?: string })
     : Promise<{ review: Review, mergeBase: MergeBaseInfo }> {
-    let baseBranch = getBaseBranchName(
-      args.baseBranch || (await target.store.readReview(target.branch))?.baseBranch || "develop");
-    let mergeBase = await findMergeBase(target.repoRoot, baseBranch);
+    let existing = await target.store.readReview(target.branch);
+    let baseBranch = getBaseBranchName(args.baseBranch || existing?.baseBranch || "develop");
+    let mergeBase = await findMergeBase(target.repoRoot, baseBranch, getRecordedMergeBases(existing));
+    let { baseRef, baseSha, mergeBaseSha, headSha } = mergeBase;
     let saved = await target.store.updateReview(target.branch, review => {
-      review ??= createReview(target.branch, baseBranch, mergeBase.mergeBaseSha);
+      review ??= createReview(target.branch, baseBranch, mergeBaseSha);
       review.baseBranch = baseBranch;
-      review.mergeBaseSha = mergeBase.mergeBaseSha;
+      review.mergeBaseSha = mergeBaseSha;
+      review.reviewedCommits = { baseRef, baseSha, mergeBaseSha, headSha };
       if (args.summary)
         review.summary = args.summary;
       this.recordCaller(review, "review");
@@ -249,6 +253,18 @@ export class ReviewTools {
     }
     return entries.join("\n");
   }
+}
+
+/**
+ * Explains to the agent how the merge-base was chosen if the base already contains HEAD (see
+ * findMergeBase); returns "" otherwise.
+ */
+function describeHeadInBase({ baseRef, headInBase }: MergeBaseInfo): string {
+  return headInBase === undefined ? ""
+    : headInBase.mergeCommitSha ? ` ${baseRef} already contains this branch (merge commit `
+      + `${headInBase.mergeCommitSha}), so the merge-base is the one from before that merge.`
+      : ` ${baseRef} already contains HEAD, so the merge-base is ` + (headInBase.isRecorded
+        ? "the one that this review recorded earlier." : "HEAD, and only uncommitted changes differ from it.");
 }
 
 /** Indents continuation lines of a comment body so that it stays inside its list item. */

@@ -15,9 +15,23 @@ export interface ReviewViewData {
   mergeBaseError: string | undefined;
   /** The base ref and merge-base with which the review's groups were posted; undefined without groups */
   postedGroups: Pick<ChangeGroups, "baseRef" | "mergeBaseSha"> | undefined;
+  /** Whether the branch has a review */
+  hasReview: boolean;
+  /** The HEAD commit of the latest agent review; undefined if no review recorded it */
+  reviewedHead: ReviewedHeadInfo | undefined;
   /** The review's overall summary (markdown), if any */
   summary: string | undefined;
   outline: ReviewOutline;
+}
+
+/** The HEAD commit of an agent's review (see ReviewedCommits), and where HEAD is now. */
+export interface ReviewedHeadInfo {
+  sha: string;
+  /**
+   * Number of commits in HEAD's history that the reviewed commit's lacks; undefined if HEAD's
+   * history no longer contains the reviewed commit (see countCommitsSince)
+   */
+  newCommitCount: number | undefined;
 }
 
 /** Commands that the buttons in the view's header run, without the `branchReviewStudio.` prefix. */
@@ -57,6 +71,8 @@ export function renderReviewViewBody(data: ReviewViewData): string {
   let notices = [
     data.mergeBaseError && `<div class="notice error">${escapeHtml(data.mergeBaseError)}</div>`,
     data.branch === undefined && `<div class="notice">HEAD is detached, so comments can't be saved.</div>`,
+    data.reviewedHead && renderReviewedHead(data.reviewedHead),
+    data.mergeBase?.headInBase && renderHeadInBaseNotice(data.mergeBase, data.hasReview),
     data.mergeBase && fileCount === 0 && `<div class="notice">No changes since the merge-base.</div>`,
     outline.isStale && data.mergeBase && data.postedGroups && renderStaleGroupsNotice(data.postedGroups,
       data.mergeBase),
@@ -131,9 +147,35 @@ function renderStaleGroupsNotice(posted: Pick<ChangeGroups, "baseRef" | "mergeBa
     + "post the groups again.</div>";
 }
 
-/** Renders a merge-base commit as its short SHA, with the full SHA as its tooltip. */
-function renderSha(sha: string): string {
-  return `<code title="merge-base ${escapeHtml(sha)}">${escapeHtml(sha.slice(0, 8))}</code>`;
+/**
+ * Renders the notice that says that the base already contains HEAD and which merge-base the diff
+ * uses instead (see findMergeBase). Without a merge commit or a recorded merge-base, the branch is
+ * as likely to be new as to be fast-forward merged, so the notice appears only if it has a review.
+ */
+function renderHeadInBaseNotice(mergeBase: MergeBaseInfo, hasReview: boolean): string {
+  let { mergeCommitSha, isRecorded } = mergeBase.headInBase!;
+  let ref = renderCode(mergeBase.baseRef);
+  let diffBase = `the diff is against ${renderSha(mergeBase.mergeBaseSha)}`;
+  let text = mergeCommitSha ? `This branch is already merged into ${ref} (merge commit `
+    + `${renderSha(mergeCommitSha, "merge commit")}), so ${diffBase}, the merge-base from before the merge.`
+    : isRecorded ? `${ref} already contains HEAD (e.g. after a fast-forward merge), so ${diffBase}, the merge-base `
+      + "that the review recorded."
+      : hasReview ? `${ref} already contains HEAD, so the diff shows only uncommitted changes: this branch was `
+        + "fast-forward merged into it, or has no commits of its own. To see a merged branch's changes, use Change "
+        + `Base Branch… to compare with the commit that ${ref} was at before the merge.` : "";
+  return text && `<div class="notice">${text}</div>`;
+}
+
+/** Renders the line that says which commit the agent reviewed and how far HEAD has moved since. */
+function renderReviewedHead({ sha, newCommitCount }: ReviewedHeadInfo): string {
+  let since = newCommitCount === undefined ? ", which HEAD's history no longer contains (rebased or reset?)."
+    : newCommitCount === 0 ? " (the current HEAD)." : `; ${formatCount(newCommitCount, "commit")} since the review.`;
+  return `<div class="notice">Reviewed commit ${renderSha(sha, "reviewed commit")}${since}</div>`;
+}
+
+/** Renders a commit as its short SHA, with what it is and the full SHA as its tooltip. */
+function renderSha(sha: string, role = "merge-base"): string {
+  return `<code title="${role} ${escapeHtml(sha)}">${escapeHtml(sha.slice(0, 8))}</code>`;
 }
 
 /** Renders text, such as a ref name, HTML-escaped in a code span. */
